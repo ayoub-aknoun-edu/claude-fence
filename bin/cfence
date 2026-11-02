@@ -549,7 +549,10 @@ cmd_statusline() { # for Claude Code's statusLine: prints the profile this sessi
   [[ "${1:-}" == "--plain" ]] && plain=1
   [[ -t 0 ]] || IFS= read -r -t 1 -d '' _ 2>/dev/null || true   # Claude pipes JSON in; consume it, but never block
   cfg="${cfg%/}"
-  if [[ -z "$cfg" || "$cfg" == "$MAIN_DIR" ]]; then name="$MAIN_NAME"
+  if [[ -z "$cfg" && -n "${CFENCE_PROFILE:-}" ]]; then name="$CFENCE_PROFILE"          # a cfence-launched main session
+  elif [[ -z "$cfg" && -z "${CFENCE_PROFILE:-}" ]]; then                              # not inside Claude: show what would be used here
+    name="$( (resolve_for_cwd; echo "${BOUND_PROFILE:-$MAIN_NAME}") 2>/dev/null)" || name="?"; [[ -n "$name" ]] || name="?"
+  elif [[ "$cfg" == "$MAIN_DIR" ]]; then name="$MAIN_NAME"
   elif [[ "$(dirname "$cfg")" == "${PROFILES_DIR%/}" ]]; then name="$(basename "$cfg")"
   else name="?"; fi
   if (( plain )) || [[ -n "${NO_COLOR:-}" ]]; then printf '[%s]' "$name"; return 0; fi
