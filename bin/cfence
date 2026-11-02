@@ -537,10 +537,26 @@ SHARING
   sync                          re-link shared files (also happens on every launch)
 
 OTHER
+  statusline [--plain]          print the active profile for a Claude Code statusLine
   completion bash|zsh|fish      print a shell completion script
   doctor                        diagnose PATH, shims, permissions, bindings, leaks
   uninstall                     remove shims + PATH block (keeps your profiles)
 EOF
+}
+
+cmd_statusline() { # for Claude Code's statusLine: prints the profile this session actually runs under. Never fails.
+  local plain=0 cfg="${CLAUDE_CONFIG_DIR:-}" name hex r g b
+  [[ "${1:-}" == "--plain" ]] && plain=1
+  [[ -t 0 ]] || IFS= read -r -t 1 -d '' _ 2>/dev/null || true   # Claude pipes JSON in; consume it, but never block
+  cfg="${cfg%/}"
+  if [[ -z "$cfg" || "$cfg" == "$MAIN_DIR" ]]; then name="$MAIN_NAME"
+  elif [[ "$(dirname "$cfg")" == "${PROFILES_DIR%/}" ]]; then name="$(basename "$cfg")"
+  else name="?"; fi
+  if (( plain )) || [[ -n "${NO_COLOR:-}" ]]; then printf '[%s]' "$name"; return 0; fi
+  hex="$(profile_color "$name")"; hex="${hex#\#}"
+  r=$((16#${hex:0:2})); g=$((16#${hex:2:2})); b=$((16#${hex:4:2}))
+  printf '\033[38;2;%d;%d;%dm[%s]\033[0m' "$r" "$g" "$b" "$name"
+  return 0
 }
 
 cmd_completion() {
@@ -548,7 +564,7 @@ cmd_completion() {
     bash) cat <<'EOS'
 _cfence() {
   local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}" cmd="${COMP_WORDS[1]:-}"
-  local cmds="init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+  local cmds="init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help"
   if (( COMP_CWORD == 1 )); then COMPREPLY=( $(compgen -W "$cmds" -- "$cur") ); return; fi
   case "$cmd" in
     login|remove|rm|rename|mv|env) COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") );;
@@ -568,7 +584,7 @@ EOS
 _cfence() {
   local -a profiles; profiles=(${(f)"$(cfence _profiles 2>/dev/null)"})
   if (( CURRENT == 2 )); then
-    _values 'command' init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help; return
+    _values 'command' init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help; return
   fi
   case "${words[2]}" in
     login|remove|rm|rename|mv|env) _describe 'profile' profiles;;
@@ -585,7 +601,7 @@ EOS
     ;;
     fish) cat <<'EOS'
 complete -c cfence -f
-complete -c cfence -n __fish_use_subcommand -a "init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+complete -c cfence -n __fish_use_subcommand -a "init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help"
 complete -c cfence -n '__fish_seen_subcommand_from login remove rm rename mv env' -a "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from bind' -a "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from run' -s p -l profile -xa "(cfence _profiles 2>/dev/null)"
@@ -605,7 +621,7 @@ case "$sub" in
   list|ls) cmd_list;; bind) cmd_bind "$@";; unbind) cmd_unbind "$@";; bindings) cmd_bindings;;
   which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; mcp) cmd_mcp "$@";;
   sync) sync_all; write_all_shims; echo "✓ synced";; doctor) cmd_doctor;; uninstall) cmd_uninstall;;
-  completion) cmd_completion "$@";; _profiles) profile_names;;
+  statusline) cmd_statusline "$@";; completion) cmd_completion "$@";; _profiles) profile_names;;
   version|--version|-V) echo "cfence $CFENCE_VERSION";; help|-h|--help) usage;;
   *) usage >&2; exit 1;;
 esac
