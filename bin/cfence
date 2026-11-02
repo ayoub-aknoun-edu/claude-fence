@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+# cfence — fence Claude Code accounts to directories.
+# https://github.com/ (see README.md)  ·  MIT  ·  bash >= 3.2, python3 (stdlib only)
+set -euo pipefail
+
+CFENCE_VERSION="0.1.0"
+
+XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+CONF_DIR="$XDG_CONFIG/cfence"
+CONF_FILE="$CONF_DIR/config"
+BINDINGS="$CONF_DIR/bindings"
+MCP_REG="$CONF_DIR/mcp.json"
+SHIM_DIR="$XDG_DATA/cfence/shims"
+PROFILES_DIR="${CFENCE_PROFILES_DIR:-$HOME/.claude-profiles}"
+MAIN_DIR="$HOME/.claude"
+MAIN_JSON="$HOME/.claude.json"
+MAIN_NAME="main"
+
+# What every profile shares with ~/.claude (symlinks). Extend via `share_extra=` in the config file.
+DEFAULT_SHARE="settings.json settings.local.json CLAUDE.md agents commands skills rules hooks plugins output-styles keybindings.json"
+# What `add --share-state` additionally shares (sessions, memory, history).
+STATE_ITEMS="projects history.jsonl file-history plans"
+# Harmless keys copied from main into a fresh profile so it skips the first-run wizard.
+CRED_VARS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX"
+SEED_KEYS="hasCompletedOnboarding theme lastOnboardingVersion"
+PALETTE=("#8aadf4" "#a6da95" "#f5a97f" "#c6a0f6" "#eed49f" "#8bd5ca" "#ed8796" "#f5bde6")
+
+die()  { echo "cfence: $1" >&2; exit "${2:-1}"; }
+warn() { echo "cfence: warning: $*" >&2; }
+info() { echo "$*" >&2; }
+
+# ───────────────────────── helpers ─────────────────────────
+valid_name() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || die "invalid profile name '$1' (a-z 0-9 _ -, max 32, must not start with - or _)"
+}
+profile_dir()  { if [[ "$1" == "$MAIN_NAME" ]]; then echo "$MAIN_DIR"; else echo "$PROFILES_DIR/$1"; fi; }
+profile_json() { if [[ "$1" == "$MAIN_NAME" ]]; then echo "$MAIN_JSON"; else echo "$PROFILES_DIR/$1/.claude.json"; fi; }
+profile_exists() { [[ "$1" == "$MAIN_NAME" ]] && return 0; [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] && [[ -d "$PROFILES_DIR/$1" ]]; }
+profile_names() {
+  echo "$MAIN_NAME"
+  [[ -d "$PROFILES_DIR" ]] || return 0
+  local d; for d in "$PROFILES_DIR"/*/; do [[ -d "$d" ]] && basename "$d"; done
+  return 0
+}
+canon_dir() {
+  [[ -d "$1" ]] || die "directory does not exist: $1"
+  local c; c="$(cd "$1" && pwd -P)"
+  case "$c" in *$'\n'*|*$'\r'*|*$'\t'*) die "refusing path with newline/tab/CR characters: it could corrupt the bindings file";; esac
+  echo "$c"
+}
+need_python() { command -v python3 >/dev/null 2>&1 || die "python3 is required for JSON handling"; }
+
+cfg_get() { # cfg_get key default  (last assignment wins; no code is ever sourced)
+  local key="$1" def="${2:-}" line val=""
+  if [[ -f "$CONF_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*${key}[[:space:]]*=(.*)$ ]] && val="${BASH_REMATCH[1]}"
+    done < "$CONF_FILE"
+    val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+    val="${val#\"}"; val="${val%\"}"
+  fi
+  echo "${val:-$def}"
+}
+share_items() { echo "$DEFAULT_SHARE $(cfg_get share_extra "")"; }
+
+PY='
+import json, os, sys, tempfile
+os.umask(0o077)
+def load(p, default=None):
+    if not os.path.exists(p):
+        return {} if default is None else default
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        sys.exit("cannot parse %s: %s (refusing to touch it)" % (p, e))
+def save(p, d, backup=True):
+    p = os.path.realpath(p)
+    if backup and os.path.exists(p) and not os.path.exists(p + ".cfence-bak"):
+        with open(p) as s, open(p + ".cfence-bak", "w") as b: b.write(s.read())
+        os.chmod(p + ".cfence-bak", 0o600)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p) or ".", prefix=".cfence-")
+    with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2)
+    os.chmod(tmp, 0o600); os.replace(tmp, p)
+m = sys.argv[1]
+if m == "account":
+    a = load(sys.argv[2]).get("oauthAccount")
+    print("%s [%s]" % (a.get("emailAddress", "?"), a.get("organizationName") or "personal") if a else "-")
+elif m == "mcp-share":                      # src_json reg name...
+    src = load(sys.argv[2]).get("mcpServers", {}); reg = load(sys.argv[3])
+    for n in sys.argv[4:]:
+        if n not in src: sys.exit("no user-scope MCP server named %r in %s" % (n, sys.argv[2]))
+        reg[n] = src[n]
+    save(sys.argv[3], reg, backup=False)
+elif m == "mcp-apply":                      # reg target_json   -> prints changed|same
+    reg = load(sys.argv[2]); tgt = load(sys.argv[3]); cur = tgt.get("mcpServers", {})
+    new = dict(cur); new.update(reg)
+    if new != cur and reg:
+        tgt["mcpServers"] = new; save(sys.argv[3], tgt); print("changed")
+    else: print("same")
+elif m == "mcp-drop":                       # target_json name reg  (only drops what cfence put there)
+    tgt = load(sys.argv[2]); cur = tgt.get("mcpServers", {}); reg = load(sys.argv[4])
+    if sys.argv[3] in cur and cur[sys.argv[3]] == reg.get(sys.argv[3]):
+        del cur[sys.argv[3]]; save(sys.argv[2], tgt)
+elif m == "mcp-unregister":                 # reg name
+    reg = load(sys.argv[2])
+    if sys.argv[3] not in reg: sys.exit("%r is not in the shared registry" % sys.argv[3])
+    del reg[sys.argv[3]]; save(sys.argv[2], reg, backup=False)
+elif m == "mcp-list":
+    for n, v in sorted(load(sys.argv[2]).items()):
+        print("%s\t%s" % (n, v.get("command") or v.get("url") or v.get("type", "?")))
+elif m == "seed":                           # main_json target_json key...
+    src = load(sys.argv[2]); tgt = load(sys.argv[3])
+    for k in sys.argv[4:]:
+        if k in src and k not in tgt: tgt[k] = src[k]
+    save(sys.argv[3], tgt, backup=False)
+'
+pyj() { need_python; python3 -I -c "$PY" "$@"; }
+
+# ───────────────────────── bindings ─────────────────────────
+BOUND_PROFILE=""; BOUND_PATH=""
+resolve_bound() { # sets BOUND_PROFILE/BOUND_PATH for the longest binding that is a prefix of $1
+  local dir="$1" prof path bestlen=0
+  BOUND_PROFILE=""; BOUND_PATH=""
+  [[ -f "$BINDINGS" ]] || return 0
+  [[ ! -e "$BINDINGS" || -r "$BINDINGS" ]] || die "cannot read $BINDINGS — refusing to guess (fail closed)" 3
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* || "$line" != *" "* ]] && continue
+    prof="${line%% *}"; path="${line#* }"
+    [[ "$prof" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || continue
+    if [[ "$path" == "/" || "$dir" == "$path" || "$dir" == "$path"/* ]] && (( ${#path} > bestlen )); then
+      BOUND_PROFILE="$prof"; BOUND_PATH="$path"; bestlen=${#path}
+    fi
+  done < "$BINDINGS"
+  return 0
+}
+resolve_for_cwd() { # direct match first, then the git main worktree (covers `git worktree add ../repo-task`)
+  local cwd common root
+  cwd="$(pwd -P)"; resolve_bound "$cwd"
+  [[ -n "$BOUND_PROFILE" ]] && return 0
+  common="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  [[ "$common" == /* ]] || common="$(cd "$common" 2>/dev/null && pwd -P)" || return 0
+  [[ "$(basename "$common")" == ".git" ]] || return 0
+  root="$(dirname "$common")"
+  # only trust a REGISTERED linked worktree (a stray .git file pointing at another repo must not borrow its fence)
+  local gd top
+  gd="$(git rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  case "$gd" in "$common"/worktrees/*) ;; *) return 0;; esac
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ "$(cat "$gd/gitdir" 2>/dev/null)" == "$top/.git" ]] || return 0
+  [[ "$root" != "$cwd" ]] && resolve_bound "$root"
+  return 0
+}
+is_ancestor() { # is pid $1 an ancestor of this process?
+  local want="$1" pid=$$ i=0 pp
+  [[ "$want" =~ ^[0-9]+$ ]] || return 1
+  while (( i++ < 64 )); do
+    pp="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" || return 1
+    [[ -z "$pp" || "$pp" == "0" ]] && return 1
+    [[ "$pp" == "$want" ]] && return 0
+    pid="$pp"
+  done
+  return 1
+}
+
+# ───────────────────────── profile plumbing ─────────────────────────
+link_missing() { # link_missing profile items...
+  local name="$1"; shift
+  local d it src; d="$(profile_dir "$name")"
+  for it in "$@"; do
+    src="$MAIN_DIR/$it"
+    [[ -e "$src" || -L "$src" ]] || continue
+    [[ -e "$d/$it" || -L "$d/$it" ]] && continue
+    ln -s "$src" "$d/$it"
+  done
+}
+profile_shares_state() { [[ -f "$(profile_dir "$1")/.cfence" ]] && grep -qx 'share_state=1' "$(profile_dir "$1")/.cfence"; }
+
+sync_profile() { # idempotent; cheap on the hot path (python only when the registry changed)
+  local name="$1" d stamp
+  [[ "$name" == "$MAIN_NAME" ]] && d="" || d="$(profile_dir "$name")"
+  if [[ -n "$d" ]]; then
+    # shellcheck disable=SC2046  # intentional word splitting: item names never contain spaces
+    link_missing "$name" $(share_items)
+    profile_shares_state "$name" && link_missing "$name" $STATE_ITEMS
+  fi
+  [[ -s "$MCP_REG" ]] || return 0
+  stamp="${d:-$CONF_DIR}/.cfence-mcp-stamp"; [[ "$name" == "$MAIN_NAME" ]] && stamp="$CONF_DIR/.main-mcp-stamp"
+  if [[ ! -f "$stamp" || "$MCP_REG" -nt "$stamp" ]]; then
+    pyj mcp-apply "$MCP_REG" "$(profile_json "$name")" >/dev/null && touch "$stamp" || return 1
+  fi
+  return 0
+}
+sync_all() { local n; while read -r n; do sync_profile "$n"; done < <(profile_names); }
+
+write_shim() { # write_shim shimname [profile]
+  local f="$SHIM_DIR/$1" self; self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+  mkdir -p "$SHIM_DIR"
+  if [[ -n "${2:-}" ]]; then
+    printf '#!/bin/sh\n# cfence-shim\nexec %q run -p %s -- "$@"\n' "$self" "$2" > "$f"
+  else
+    printf '#!/bin/sh\n# cfence-shim\nexec %q run -- "$@"\n' "$self" > "$f"
+  fi
+  chmod +x "$f"
+}
+write_all_shims() {
+  local n f; write_shim claude
+  while read -r n; do [[ "$n" == "$MAIN_NAME" ]] || write_shim "claude-$n" "$n"; done < <(profile_names)
+  for f in "$SHIM_DIR"/claude-*; do   # prune shims of deleted profiles
+    [[ -e "$f" ]] || continue; n="$(basename "$f")"; profile_exists "${n#claude-}" || rm -f "$f"
+  done
+}
+
+real_claude() {
+  local v p="" d found; v="$(cfg_get real_claude "")"
+  if [[ -n "$v" ]]; then [[ -x "$v" && "$v" == /* ]] || die "real_claude=$v must be an absolute executable path"; if head -c 300 "$v" 2>/dev/null | grep -q cfence-shim; then die "real_claude points at a cfence shim"; fi; echo "$v"; return; fi
+  local IFS=: shim_canon; shim_canon="$(cd "$SHIM_DIR" 2>/dev/null && pwd -P || echo "$SHIM_DIR")"
+  set -f
+  for d in $PATH; do
+    [[ "$d" == /* && "$d" != "$SHIM_DIR" ]] || continue
+    [[ "$(cd "$d" 2>/dev/null && pwd -P)" == "$shim_canon" ]] && continue
+    p="${p:+$p:}$d"
+  done
+  set +f; unset IFS
+  [[ -n "$p" ]] || die "PATH has no usable directories besides the cfence shim dir"
+  found="$(PATH="$p" command -v claude 2>/dev/null)" || die "cannot find the real 'claude' binary on PATH (install Claude Code, or set real_claude= in $CONF_FILE)"
+  case "$(cd "$(dirname "$found")" && pwd -P)" in "$SHIM_DIR"|"$(cd "$SHIM_DIR" 2>/dev/null && pwd -P || echo /nonexistent)") die "resolved 'claude' is a cfence shim — set real_claude= in $CONF_FILE" ;; esac
+  if head -c 300 "$found" 2>/dev/null | grep -q 'cfence-shim'; then die "resolved 'claude' ($found) is a cfence shim — set real_claude= in $CONF_FILE"; fi
+  echo "$found"
+}
+
+profile_color() { local i; i=$(( $(printf '%s' "$1" | cksum | cut -d' ' -f1) % ${#PALETTE[@]} )); echo "${PALETTE[$i]}"; }
+
+# ───────────────────────── commands ─────────────────────────
+cmd_init() {
+  local yes=0 norc=0
+  while [[ $# -gt 0 ]]; do case "$1" in --yes|-y) yes=1;; --no-rc) norc=1;; *) die "init: unknown option $1";; esac; shift; done
+  mkdir -p "$CONF_DIR" "$PROFILES_DIR" "$SHIM_DIR"; chmod 700 "$PROFILES_DIR"
+  touch "$BINDINGS"
+  if [[ ! -f "$CONF_FILE" ]]; then cat > "$CONF_FILE" <<'EOF'
+# cfence config — plain key=value, never sourced as code.
+# Extra items from ~/.claude to symlink into every profile (space separated), e.g. AGENTS.md scripts
+share_extra=
+# Absolute path of the real claude binary (only needed if auto-detection fails)
+# real_claude=/home/you/.local/bin/claude
+EOF
+  fi
+  write_all_shims
+  echo "✓ initialised ($CONF_DIR, shims in $SHIM_DIR)"
+  (( norc )) || setup_rc "$yes"
+  echo "Next: cfence add <name> && cfence login <name> && cfence bind <name> <dir>   (see: cfence help)"
+}
+
+RC_BEGIN="# >>> cfence >>>"; RC_END="# <<< cfence <<<"
+rc_file_for_shell() {
+  case "$(basename "${SHELL:-}")" in
+    zsh) echo "$HOME/.zshrc";;
+    bash) if [[ "$(uname)" == Darwin || ! -f "$HOME/.bashrc" ]]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi;;
+    fish) echo "$HOME/.config/fish/config.fish";; *) echo "";;
+  esac
+}
+setup_rc() {
+  local yes="$1" rc line ans=y
+  rc="$(rc_file_for_shell)"
+  if [[ -z "$rc" ]]; then info "Add this to your shell startup file manually:  export PATH=\"$SHIM_DIR:\$PATH\""; return; fi
+  if [[ -f "$rc" ]] && grep -qF "$RC_BEGIN" "$rc"; then echo "✓ PATH block already in $rc"; return; fi
+  if [[ "$(basename "$rc")" == "config.fish" ]]; then line="fish_add_path -m \"$SHIM_DIR\""; else line="export PATH=\"$SHIM_DIR:\$PATH\""; fi
+  if (( ! yes )); then
+    if [[ -t 0 ]]; then read -r -p "Add the cfence shim dir to PATH in $rc? [Y/n] " ans || ans=n; else ans=n; fi
+  fi
+  if [[ "${ans:-y}" =~ ^([Yy]|[Yy][Ee][Ss])?$ ]]; then
+    mkdir -p "$(dirname "$rc")"
+    printf '\n%s\n%s\n%s\n' "$RC_BEGIN" "$line" "$RC_END" >> "$rc"
+    echo "✓ added PATH block to $rc — open a new shell (or: exec \$SHELL)"
+  else info "Skipped. Add manually:  $line"; fi
+}
+
+cmd_add() {
+  local name="" share=0 login=0
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --share-state) share=1;; --login) login=1;;
+    -*) die "add: unknown option $1";; *) [[ -z "$name" ]] && name="$1" || die "add: too many arguments";;
+  esac; shift; done
+  [[ -n "$name" ]] || die "usage: cfence add <name> [--share-state] [--login]"
+  valid_name "$name"; [[ "$name" != "$MAIN_NAME" ]] || die "'$MAIN_NAME' is the built-in default (~/.claude)"
+  [[ ! -e "$PROFILES_DIR/$name" ]] || die "profile '$name' already exists"
+  [[ -d "$CONF_DIR" ]] || cmd_init --no-rc >/dev/null
+  mkdir -p "$PROFILES_DIR/$name"; chmod 700 "$PROFILES_DIR" "$PROFILES_DIR/$name"
+  (( share )) && echo "share_state=1" > "$PROFILES_DIR/$name/.cfence"
+  if [[ -f "$MAIN_JSON" ]] && ! pyj seed "$MAIN_JSON" "$(profile_json "$name")" $SEED_KEYS; then
+    rm -rf -- "${PROFILES_DIR:?}/$name"; die "could not read $MAIN_JSON; profile not created"
+  fi
+  sync_profile "$name"; write_shim "claude-$name" "$name"
+  echo "✓ profile '$name' created ($PROFILES_DIR/$name)"
+  (( share )) && echo "  • sessions/memory/history SHARED with main (--share-state)" || echo "  • sessions/memory/history are private to this profile"
+  if (( login )); then cmd_login "$name"; else echo "  next: cfence login $name"; fi
+}
+
+cmd_remove() {
+  local name="${1:-}" yes="${2:-}"; [[ -n "$name" ]] || die "usage: cfence remove <name> --yes"
+  valid_name "$name"; [[ "$name" != "$MAIN_NAME" ]] || die "refusing to remove main (~/.claude)"
+  [[ -d "$PROFILES_DIR/$name" ]] || die "no such profile '$name'"
+  [[ "$yes" == "--yes" ]] || die "this deletes the profile's login and private data; re-run with --yes"
+  rm -rf -- "${PROFILES_DIR:?}/$name"; rm -f -- "$SHIM_DIR/claude-$name"
+  if [[ -f "$BINDINGS" ]]; then awk -v p="$name" '$1!=p' "$BINDINGS" > "$BINDINGS.tmp" && mv "$BINDINGS.tmp" "$BINDINGS"; fi
+  echo "✓ removed '$name' (symlinked shared files in ~/.claude were not touched; its bindings were dropped)"
+}
+
+cmd_login() {
+  local name="${1:-}"; [[ -n "$name" ]] || die "usage: cfence login <name>"
+  profile_exists "$name" || die "no such profile '$name'"
+  sync_profile "$name"
+  local real; real="$(real_claude)"
+  if [[ "$name" == "$MAIN_NAME" ]]; then unset CLAUDE_CONFIG_DIR; else CLAUDE_CONFIG_DIR="$(profile_dir "$name")"; export CLAUDE_CONFIG_DIR; fi
+  info "Signing '$name' in — use the account you want for THIS profile."
+  "$real" auth login
+}
+
+cmd_list() {
+  resolve_for_cwd
+  local n acct state note active="${BOUND_PROFILE:-$MAIN_NAME}"
+  printf '%-14s %-44s %-8s %s\n' PROFILE ACCOUNT STATE NOTE
+  while read -r n; do
+    acct="$(pyj account "$(profile_json "$n")" 2>/dev/null || echo '?')"; [[ "$acct" == "-" ]] && acct="(not logged in)"
+    if [[ "$n" == "$MAIN_NAME" ]]; then state="default"; elif profile_shares_state "$n"; then state="shared"; else state="private"; fi
+    note=""; [[ "$n" == "$active" ]] && note="<- here"
+    printf '%-14s %-44s %-8s %s\n' "$n" "$acct" "$state" "$note"
+  done < <(profile_names)
+}
+
+cmd_bind() {
+  local name="${1:-}" dir; [[ -n "$name" ]] || die "usage: cfence bind <profile> [dir]"
+  profile_exists "$name" || die "no such profile '$name'"
+  dir="$(canon_dir "${2:-$PWD}")"
+  mkdir -p "$CONF_DIR"; touch "$BINDINGS"
+  { P="$dir" awk '{ s=$0; sub(/^[^ ]+ /,"",s); if (s!=ENVIRON["P"]) print }' "$BINDINGS"; echo "$name $dir"; } > "$BINDINGS.tmp"
+  mv "$BINDINGS.tmp" "$BINDINGS"
+  echo "✓ $dir -> $name   (applies to subdirectories and git worktrees of this repo)"
+}
+cmd_unbind() {
+  local dir="${1:-$PWD}"; [[ -f "$BINDINGS" ]] || die "no bindings"
+  if [[ -d "$dir" ]]; then dir="$(canon_dir "$dir")"
+  elif [[ -d "$(dirname "$dir")" ]]; then dir="$(canon_dir "$(dirname "$dir")")/$(basename "$dir")"   # deleted dir: canonicalise its parent (macOS /var -> /private/var)
+  fi
+  P="$dir" awk '{ s=$0; sub(/^[^ ]+ /,"",s); if (s!=ENVIRON["P"]) print }' "$BINDINGS" > "$BINDINGS.tmp"; mv "$BINDINGS.tmp" "$BINDINGS"
+  echo "✓ unbound $dir"
+}
+cmd_bindings() { if [[ -s "$BINDINGS" ]]; then sort -k2 "$BINDINGS"; else echo "(no bindings)"; fi; }
+
+pick_profile() { # sets PICK_PROFILE / PICK_REASON ; args: explicit_profile
+  local explicit="$1"
+  PICK_PROFILE=""; PICK_REASON=""
+  resolve_for_cwd
+  if [[ -n "$explicit" ]]; then PICK_PROFILE="$explicit"; PICK_REASON="explicit"
+  elif [[ -n "${CFENCE_PROFILE:-}" && -n "${CFENCE_PID:-}" ]] && is_ancestor "$CFENCE_PID"; then
+    PICK_PROFILE="$CFENCE_PROFILE"; PICK_REASON="inherited from parent claude"
+  elif [[ -n "$BOUND_PROFILE" ]]; then PICK_PROFILE="$BOUND_PROFILE"; PICK_REASON="bound: $BOUND_PATH"
+  else PICK_PROFILE="$MAIN_NAME"; PICK_REASON="default (no binding)"; fi
+}
+cmd_which() {
+  local quiet=0 explicit=""
+  [[ "${1:-}" == "-q" ]] && quiet=1
+  pick_profile "$explicit"
+  if (( quiet )); then echo "$PICK_PROFILE"; else echo "$PICK_PROFILE  ($PICK_REASON)"; fi
+}
+
+cmd_env() { # cfence env [name] -> eval "$(cfence env personal)" for IDEs / other tools
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then pick_profile ""; name="$PICK_PROFILE"; fi
+  profile_exists "$name" || die "no such profile '$name'"
+  resolve_for_cwd
+  [[ -z "$BOUND_PROFILE" || "$BOUND_PROFILE" == "$name" || "${2:-}" == "--force" ]] || die "$BOUND_PATH is fenced to '$BOUND_PROFILE'; refusing to emit '$name' (add --force to override)" 3
+  local fish=0; [[ "$(basename "${SHELL:-}")" == fish || "${2:-}" == "--fish" || "${3:-}" == "--fish" ]] && fish=1
+  if [[ "$name" == "$MAIN_NAME" ]]; then (( fish )) && echo "set -e CLAUDE_CONFIG_DIR" || echo "unset CLAUDE_CONFIG_DIR"
+  else (( fish )) && printf 'set -gx CLAUDE_CONFIG_DIR %s\n' "$(profile_dir "$name")" || printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(profile_dir "$name")"; fi
+}
+
+cmd_run() {
+  local explicit="" force=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -p|--profile) [[ -n "${2:-}" ]] || die "run: -p needs a name"; explicit="$2"; shift 2;;
+    --force) force=1; shift;; --) shift; break;; *) break;; esac; done
+  pick_profile "$explicit"
+  local profile="$PICK_PROFILE"
+  if [[ -n "$BOUND_PROFILE" ]] && ! profile_exists "$BOUND_PROFILE"; then
+    die "$BOUND_PATH is bound to '$BOUND_PROFILE' which no longer exists. Refusing to fall back to another account. (cfence unbind '$BOUND_PATH' or recreate the profile)" 3
+  fi
+  profile_exists "$profile" || die "no such profile '$profile' (cfence list)" 2
+  if [[ -n "$BOUND_PROFILE" && "$profile" != "$BOUND_PROFILE" && -z "$force" ]]; then
+    die "$BOUND_PATH is fenced to '$BOUND_PROFILE' but '$profile' was requested ($PICK_REASON). Use the --force flag only if you really mean it." 3
+  fi
+  local real v; real="$(real_claude)"
+  if [[ -n "$BOUND_PROFILE" ]]; then   # env credentials outrank the profile login, so they would defeat the fence
+    for v in $CRED_VARS; do [[ -n "${!v:-}" ]] && { warn "$v is set; ignoring it inside a fenced directory"; unset "$v"; }; done
+  fi
+  [[ "$profile" == "$MAIN_NAME" ]] || sync_profile "$profile" || warn "sync skipped (launching anyway; see: cfence doctor)"
+  if [[ "$profile" == "$MAIN_NAME" ]]; then unset CLAUDE_CONFIG_DIR; else CLAUDE_CONFIG_DIR="$(profile_dir "$profile")"; export CLAUDE_CONFIG_DIR; fi
+  export CFENCE_PROFILE="$profile" CFENCE_PID="$$"
+  [[ -z "${CFENCE_QUIET:-}" && -t 2 ]] && info "▶ claude [$profile]${BOUND_PROFILE:+ (fenced)}"
+  # tmux: label the pane, then exec so the pane's foreground process stays `claude`
+  # (tmux names windows after it; a wrapper process would show up as "bash").
+  # The label is only displayed while the pane runs claude (see contrib/tmux.conf), so no cleanup is needed.
+  if [[ -n "${TMUX:-}" && -n "${TMUX_PANE:-}" && -z "${CFENCE_NO_TMUX:-}" && "$PICK_REASON" != inherited* ]] && command -v tmux >/dev/null 2>&1; then
+    tmux set-option -p -t "$TMUX_PANE" @cfence "$profile" >/dev/null 2>&1 || true
+    tmux set-option -p -t "$TMUX_PANE" @cfence_color "$(profile_color "$profile")" >/dev/null 2>&1 || true
+  fi
+  exec "$real" "$@"
+}
+
+cmd_mcp() {
+  local sub="${1:-list}"; shift || true; mkdir -p "$CONF_DIR"
+  case "$sub" in
+    share)   [[ $# -ge 1 ]] || die "usage: cfence mcp share <server>... [--from <profile>]"
+             local from="$MAIN_NAME"; names=()
+             while [[ $# -gt 0 ]]; do case "$1" in --from) [[ -n "${2:-}" ]] || die "--from needs a profile"; from="$2"; shift 2;; *) names+=("$1"); shift;; esac; done
+             profile_exists "$from" || die "no such profile '$from'"
+             (( ${#names[@]} )) || die "usage: cfence mcp share <server>... [--from <profile>]"
+             touch "$MCP_REG"; chmod 600 "$MCP_REG"; [[ -s "$MCP_REG" ]] || echo '{}' > "$MCP_REG"
+             pyj mcp-share "$(profile_json "$from")" "$MCP_REG" "${names[@]}"; sync_all
+             echo "✓ shared with every profile: ${names[*]}"; echo "  note: the registry ($MCP_REG) may contain secrets; it is chmod 600 and stays outside your repos";;
+    unshare) [[ $# -ge 1 ]] || die "usage: cfence mcp unshare <server>"
+             local n reg_copy; reg_copy="$(mktemp)"; cp "$MCP_REG" "$reg_copy"
+             pyj mcp-unregister "$MCP_REG" "$1" || { rm -f "$reg_copy"; exit 1; }
+             while read -r n; do [[ "$n" == "$MAIN_NAME" ]] && continue; pyj mcp-drop "$(profile_json "$n")" "$1" "$reg_copy"; done < <(profile_names)
+             rm -f "$reg_copy"
+             echo "✓ '$1' removed from the registry and from non-main profiles (main keeps its own copy)";;
+    list)    if [[ -s "$MCP_REG" ]]; then pyj mcp-list "$MCP_REG"; else echo "(no shared MCP servers — try: cfence mcp share <name>)"; fi;;
+    sync)    rm -f "$CONF_DIR"/.main-mcp-stamp "$PROFILES_DIR"/*/.cfence-mcp-stamp 2>/dev/null || true; sync_all; echo "✓ synced";;
+    *) die "usage: cfence mcp [list|share|unshare|sync]";;
+  esac
+}
+
+cmd_doctor() {
+  local bad=0 n d it f
+  ok()  { echo "  ✓ $*"; }
+  no()  { echo "  ✗ $*"; bad=1; }
+  wn()  { echo "  ! $*"; }
+  echo "cfence $CFENCE_VERSION doctor"
+  command -v python3 >/dev/null && ok "python3 present" || no "python3 missing (needed for JSON ops)"
+  if f="$(real_claude 2>/dev/null)"; then ok "real claude: $f"; else no "real claude not found"; fi
+  f="$(command -v claude 2>/dev/null || true)"
+  if [[ "$f" == "$SHIM_DIR/claude" ]]; then ok "'claude' on PATH resolves to the cfence shim"
+  else no "'claude' resolves to '${f:-nothing}', not the shim — put $SHIM_DIR FIRST in PATH (cfence init)"; fi
+  [[ -n "${CLAUDE_CONFIG_DIR:-}" ]] && wn "CLAUDE_CONFIG_DIR is set in this shell ($CLAUDE_CONFIG_DIR); cfence overrides it, but other tools will obey it"
+  if command -v tmux >/dev/null && tmux show-environment -g CLAUDE_CONFIG_DIR >/dev/null 2>&1 && ! tmux show-environment -g CLAUDE_CONFIG_DIR 2>&1 | grep -q '^-'; then
+    wn "tmux server has CLAUDE_CONFIG_DIR in its global environment — every new pane inherits it. Fix: tmux set-environment -gu CLAUDE_CONFIG_DIR"
+  fi
+  for it in $CRED_VARS; do [[ -n "${!it:-}" ]] && wn "$it is set in this shell: it overrides profile logins (cfence ignores it only inside fenced directories)"; done
+  if [[ -f "$MAIN_DIR/settings.json" ]] && grep -Eq '"(apiKeyHelper|forceLoginOrgUUID|forceLoginMethod)"|"ANTHROPIC_(API_KEY|AUTH_TOKEN)"' "$MAIN_DIR/settings.json"; then
+    wn "shared settings.json sets account-level keys (apiKeyHelper/forceLogin*/ANTHROPIC_*) that apply to EVERY profile — move them to per-profile settings"
+  fi
+  [[ -d "$MAIN_DIR" ]] && ok "main profile: $MAIN_DIR" || wn "$MAIN_DIR does not exist yet (run claude once / login)"
+  while read -r n; do
+    [[ "$n" == "$MAIN_NAME" ]] && continue
+    d="$(profile_dir "$n")"
+    [[ "$(stat -c %a "$d" 2>/dev/null || stat -f %Lp "$d")" == "700" ]] && ok "profile $n: dir mode 700" || wn "profile $n: dir is not mode 700 (chmod 700 '$d')"
+    [[ -f "$d/.credentials.json" || -f "$d/.claude.json" ]] || wn "profile $n: not logged in (cfence login $n)"
+    for it in $(share_items); do
+      [[ -e "$MAIN_DIR/$it" || -L "$MAIN_DIR/$it" ]] || continue
+      if [[ -L "$d/$it" ]]; then :; elif [[ -e "$d/$it" ]]; then wn "profile $n: $it is a private copy, not a symlink (diverged from main; delete it and run 'cfence sync')"; else wn "profile $n: $it not linked (cfence sync)"; fi
+    done
+  done < <(profile_names)
+  if [[ -s "$BINDINGS" ]]; then
+    local prof path
+    while read -r prof path; do
+      [[ -z "${prof:-}" || "$prof" == \#* ]] && continue
+      profile_exists "$prof" || no "binding '$path' -> missing profile '$prof' (launching there will refuse)"
+      [[ -d "$path" ]] || wn "binding path no longer exists: $path"
+    done < "$BINDINGS"
+    ok "bindings checked"
+  fi
+  exit "$bad"
+}
+
+cmd_uninstall() {
+  local rc
+  for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
+    [[ -f "$rc" ]] && grep -qxF "$RC_BEGIN" "$rc" || continue
+    grep -qxF "$RC_END" "$rc" || { warn "$rc has the BEGIN marker but no END marker; not editing it — remove the cfence lines by hand"; continue; }
+    local tmp; tmp="$(mktemp "$(dirname "$rc")/.cfence-rc.XXXXXX")"
+    cp "$rc" "$rc.cfence-bak"
+    awk -v b="$RC_BEGIN" -v e="$RC_END" '$0==b{s=1;next} $0==e{s=0;next} !s' "$rc" > "$tmp" && cat "$tmp" > "$rc"; rm -f "$tmp"
+    echo "✓ removed PATH block from $rc (backup: $rc.cfence-bak)"
+  done
+  rm -rf -- "$SHIM_DIR"; echo "✓ removed shims"
+  echo "Kept (delete by hand if you want): $CONF_DIR (bindings/config), $PROFILES_DIR (logins + data), the cfence binary itself."
+}
+
+usage() { cat <<EOF
+cfence $CFENCE_VERSION — fence Claude Code accounts to directories
+
+SETUP
+  init [--yes] [--no-rc]        create config + shims, add the shim dir to PATH
+  add <name> [--share-state] [--login]
+                                new profile. --share-state also shares sessions,
+                                memory & history with main (use for same-org accounts)
+  login <name>                  sign the profile in (opens the browser)
+  remove <name> --yes           delete a profile (login + private data)
+
+DAILY
+  claude                        auto-picks the profile for the current directory
+  claude-<name>                 one-off override (refused inside a fenced directory)
+  bind <profile> [dir]          always use <profile> in dir, its subdirs and git worktrees
+  unbind [dir]  ·  bindings     remove / list bindings
+  list  ·  which [-q]           profiles + accounts  /  what applies here and why
+  env [name]                    print export/unset for IDEs:  eval "\$(cfence env personal)"
+
+SHARING
+  mcp share <server>...         copy a user-scope MCP server into every profile
+  mcp unshare|list|sync         manage the shared registry
+  sync                          re-link shared files (also happens on every launch)
+
+OTHER
+  doctor                        diagnose PATH, shims, permissions, bindings, leaks
+  uninstall                     remove shims + PATH block (keeps your profiles)
+EOF
+}
+
+sub="${1:-help}"; shift || true
+case "$sub" in
+  init) cmd_init "$@";; add) cmd_add "$@";; remove|rm) cmd_remove "$@";; login) cmd_login "$@";;
+  list|ls) cmd_list;; bind) cmd_bind "$@";; unbind) cmd_unbind "$@";; bindings) cmd_bindings;;
+  which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; mcp) cmd_mcp "$@";;
+  sync) sync_all; write_all_shims; echo "✓ synced";; doctor) cmd_doctor;; uninstall) cmd_uninstall;;
+  version|--version|-V) echo "cfence $CFENCE_VERSION";; help|-h|--help) usage;;
+  *) usage >&2; exit 1;;
+esac

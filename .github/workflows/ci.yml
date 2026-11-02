@@ -1,0 +1,31 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x -S warning bin/cfence install.sh uninstall.sh tests/run.sh
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: tests (default bash)
+        run: bash tests/run.sh
+      - name: tests (macOS stock bash 3.2)
+        if: runner.os == 'macOS'
+        run: /bin/bash tests/run.sh
+      - name: install / doctor / uninstall smoke test
+        run: |
+          export HOME="$(mktemp -d)"; mkdir -p "$HOME/.claude"
+          ./install.sh --yes --no-rc
+          "$HOME/.local/bin/cfence" add smoke
+          "$HOME/.local/bin/cfence" list
+          ./uninstall.sh
