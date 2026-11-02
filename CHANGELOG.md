@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- `cfence completion bash|zsh|fish`: tab-completion for commands, profile names and directories.
+
 ## 0.1.0 — 2026-11-02
 - Profiles via `CLAUDE_CONFIG_DIR`, shared skills/agents/rules/hooks/plugins/settings by symlink, optional shared state (`--share-state`).
 - Directory fences (longest prefix, git-worktree aware) enforced by a `claude` shim; fail-closed on missing profiles / unreadable bindings.

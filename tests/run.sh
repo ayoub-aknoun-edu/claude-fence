@@ -211,6 +211,16 @@ if command -v tmux >/dev/null; then
   tmux -L "$S2" kill-server 2>/dev/null
 fi
 
+echo "[completion]"
+for sh in bash zsh fish; do out="$($CF completion $sh)"; has "completion $sh emits a script" "$out" "cfence"; done
+code 1 "completion with unknown shell fails" $CF completion tcsh
+eq "_profiles lists profile names" "$($CF _profiles | tr '\n' ' ')" "$($CF list | awk 'NR>1{print $1}' | tr '\n' ' ')"
+BINDIR="$(dirname "$CF")"
+r="$(PATH="$BINDIR:$PATH" bash -c 'source <(cfence completion bash); COMP_WORDS=(cfence login ""); COMP_CWORD=2; _cfence; echo "${COMPREPLY[*]}"')"
+has "bash completion offers profiles for login" "$r" "main"
+r="$(PATH="$BINDIR:$PATH" bash -c 'source <(cfence completion bash); COMP_WORDS=(cfence ""); COMP_CWORD=1; _cfence; echo "${COMPREPLY[*]}"')"
+has "bash completion offers subcommands" "$r" "doctor"
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]

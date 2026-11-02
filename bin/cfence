@@ -513,9 +513,66 @@ SHARING
   sync                          re-link shared files (also happens on every launch)
 
 OTHER
+  completion bash|zsh|fish      print a shell completion script
   doctor                        diagnose PATH, shims, permissions, bindings, leaks
   uninstall                     remove shims + PATH block (keeps your profiles)
 EOF
+}
+
+cmd_completion() {
+  case "${1:-}" in
+    bash) cat <<'EOS'
+_cfence() {
+  local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}" cmd="${COMP_WORDS[1]:-}"
+  local cmds="init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+  if (( COMP_CWORD == 1 )); then COMPREPLY=( $(compgen -W "$cmds" -- "$cur") ); return; fi
+  case "$cmd" in
+    login|remove|rm|env) COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") );;
+    bind) if (( COMP_CWORD == 2 )); then COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ); else COMPREPLY=( $(compgen -d -- "$cur") ); fi;;
+    unbind) COMPREPLY=( $(compgen -d -- "$cur") );;
+    run) [[ "$prev" == -p || "$prev" == --profile ]] && COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ) || COMPREPLY=( $(compgen -W "-p --force --" -- "$cur") );;
+    add) COMPREPLY=( $(compgen -W "--share-state --login" -- "$cur") );;
+    mcp) (( COMP_CWORD == 2 )) && COMPREPLY=( $(compgen -W "share unshare list sync" -- "$cur") );;
+    completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
+  esac
+}
+complete -F _cfence cfence
+EOS
+    ;;
+    zsh) cat <<'EOS'
+#compdef cfence
+_cfence() {
+  local -a profiles; profiles=(${(f)"$(cfence _profiles 2>/dev/null)"})
+  if (( CURRENT == 2 )); then
+    _values 'command' init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help; return
+  fi
+  case "${words[2]}" in
+    login|remove|rm|env) _describe 'profile' profiles;;
+    bind) if (( CURRENT == 3 )); then _describe 'profile' profiles; else _files -/; fi;;
+    unbind) _files -/;;
+    run) if [[ "${words[CURRENT-1]}" == (-p|--profile) ]]; then _describe 'profile' profiles; else _values 'option' -p --force --; fi;;
+    add) _values 'option' --share-state --login;;
+    mcp) (( CURRENT == 3 )) && _values 'action' share unshare list sync;;
+    completion) _values 'shell' bash zsh fish;;
+  esac
+}
+compdef _cfence cfence
+EOS
+    ;;
+    fish) cat <<'EOS'
+complete -c cfence -f
+complete -c cfence -n __fish_use_subcommand -a "init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+complete -c cfence -n '__fish_seen_subcommand_from login remove rm env' -a "(cfence _profiles 2>/dev/null)"
+complete -c cfence -n '__fish_seen_subcommand_from bind' -a "(cfence _profiles 2>/dev/null)"
+complete -c cfence -n '__fish_seen_subcommand_from run' -s p -l profile -xa "(cfence _profiles 2>/dev/null)"
+complete -c cfence -n '__fish_seen_subcommand_from run' -l force
+complete -c cfence -n '__fish_seen_subcommand_from add' -l share-state -l login
+complete -c cfence -n '__fish_seen_subcommand_from mcp' -a "share unshare list sync"
+complete -c cfence -n '__fish_seen_subcommand_from completion' -a "bash zsh fish"
+EOS
+    ;;
+    *) die "usage: cfence completion bash|zsh|fish   (e.g. eval \"\$(cfence completion zsh)\")";;
+  esac
 }
 
 sub="${1:-help}"; shift || true
@@ -524,6 +581,7 @@ case "$sub" in
   list|ls) cmd_list;; bind) cmd_bind "$@";; unbind) cmd_unbind "$@";; bindings) cmd_bindings;;
   which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; mcp) cmd_mcp "$@";;
   sync) sync_all; write_all_shims; echo "✓ synced";; doctor) cmd_doctor;; uninstall) cmd_uninstall;;
+  completion) cmd_completion "$@";; _profiles) profile_names;;
   version|--version|-V) echo "cfence $CFENCE_VERSION";; help|-h|--help) usage;;
   *) usage >&2; exit 1;;
 esac
