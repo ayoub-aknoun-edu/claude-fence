@@ -221,6 +221,28 @@ has "bash completion offers profiles for login" "$r" "main"
 r="$(PATH="$BINDIR:$PATH" bash -c 'eval "$(cfence completion bash)"; COMP_WORDS=(cfence ""); COMP_CWORD=1; _cfence; echo "${COMPREPLY[*]}"')"
 has "bash completion offers subcommands" "$r" "doctor"
 
+echo "[rename]"
+mkdir -p "$T/r/dir with space" "$T/r/plain"
+$CF add oldname >/dev/null; $CF bind oldname "$T/r/dir with space" >/dev/null; $CF bind oldname "$T/r/plain" >/dev/null
+$CF bind personal "$T/r/other" >/dev/null 2>&1 || { mkdir -p "$T/r/other"; $CF bind personal "$T/r/other" >/dev/null; }
+echo '{"x":1}' > "$P/oldname/marker.json"
+printf '#!/bin/sh\necho "FAKE cfg=$CLAUDE_CONFIG_DIR"\n' > "$T/fakebin/claude"
+$CF rename oldname newname >/dev/null; rc=$?
+eq "rename succeeds" "$rc" "0"
+[[ -f "$P/newname/marker.json" && ! -e "$P/oldname" ]] && ok "rename moves the profile directory" || bad "dir not moved"
+[[ -x "$SHIM/claude-newname" && ! -e "$SHIM/claude-oldname" ]] && ok "rename swaps the shim" || bad "shim not swapped"
+eq "binding with spaces follows the rename" "$(cd "$T/r/dir with space" && $CF which -q)" "newname"
+eq "plain binding follows the rename" "$(cd "$T/r/plain" && $CF which -q)" "newname"
+eq "unrelated binding untouched" "$(cd "$T/r/other" && $CF which -q)" "personal"
+has "renamed profile launches with its new dir" "$(cd "$T/r/plain" && $CF run -- hi 2>/dev/null)" "cfg=$P/newname"
+code 1 "rename main refused" $CF rename main foo
+code 1 "rename to main refused" $CF rename newname main
+code 1 "rename onto existing profile refused" $CF rename newname personal
+code 1 "rename unknown profile refused" $CF rename ghost2 foo
+code 1 "rename to invalid name refused" $CF rename newname "Bad Name"
+code 1 "rename needs two args" $CF rename newname
+$CF remove newname --yes >/dev/null
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]
