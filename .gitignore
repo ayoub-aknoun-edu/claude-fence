@@ -1,0 +1,4 @@
+.cfence-bak
+*.tmp
+.vscode/
+.idea/
