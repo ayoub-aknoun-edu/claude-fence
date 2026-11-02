@@ -331,8 +331,8 @@ if command -v fish >/dev/null 2>&1; then
   eq "fish: cfence env --fish quotes awkward paths" "$(CFENCE_PROFILES_DIR="$SP" $CF env quoted --fish | fish -c 'source; echo $CLAUDE_CONFIG_DIR' 2>/dev/null)" "$SP/quoted"
   CFENCE_PROFILES_DIR="$SP" $CF remove quoted --yes >/dev/null 2>&1; rm -rf "$SP"
   eq "fish: cfence env main unsets the variable" "$(CLAUDE_CONFIG_DIR=/x $CF env main --fish | fish -c 'set -gx CLAUDE_CONFIG_DIR /x; source; echo "[$CLAUDE_CONFIG_DIR]"' 2>/dev/null)" "[]"
-  has "fish completions offer profile names" "$(fish -c "$($CF completion fish)"$'\n''complete -C "cfence login "' 2>/dev/null | tr '\n' ' ')" "main"
-  has "fish completions offer subcommands" "$(fish -c "$($CF completion fish)"$'\n''complete -C "cfence lau"' 2>/dev/null)" "launch"
+  has "fish completions offer profile names" "$(PATH="$HERE/bin:$PATH" fish -c "$($CF completion fish)"$'\n''complete -C "cfence login "' 2>/dev/null | tr '\n' ' ')" "main"
+  has "fish completions offer subcommands" "$(PATH="$HERE/bin:$PATH" fish -c "$($CF completion fish)"$'\n''complete -C "cfence lau"' 2>/dev/null)" "launch"
   # a stale universal entry left by older cfence versions is removed by uninstall
   fish -c "fish_add_path -m $SHIM" >/dev/null 2>&1
   has "(setup) legacy universal entry present" "$(fish -c 'set -S fish_user_paths' 2>/dev/null)" "universal"
