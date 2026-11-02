@@ -340,7 +340,10 @@ cmd_bind() {
   echo "✓ $dir -> $name   (applies to subdirectories and git worktrees of this repo)"
 }
 cmd_unbind() {
-  local dir="${1:-$PWD}"; [[ -d "$dir" ]] && dir="$(canon_dir "$dir")"; [[ -f "$BINDINGS" ]] || die "no bindings"
+  local dir="${1:-$PWD}"; [[ -f "$BINDINGS" ]] || die "no bindings"
+  if [[ -d "$dir" ]]; then dir="$(canon_dir "$dir")"
+  elif [[ -d "$(dirname "$dir")" ]]; then dir="$(canon_dir "$(dirname "$dir")")/$(basename "$dir")"   # deleted dir: canonicalise its parent (macOS /var -> /private/var)
+  fi
   P="$dir" awk '{ s=$0; sub(/^[^ ]+ /,"",s); if (s!=ENVIRON["P"]) print }' "$BINDINGS" > "$BINDINGS.tmp"; mv "$BINDINGS.tmp" "$BINDINGS"
   echo "✓ unbound $dir"
 }

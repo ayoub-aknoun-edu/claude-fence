@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Self-contained test suite. Runs in a throwaway $HOME with a fake `claude`; never touches real accounts.
 set -uo pipefail
+with_timeout() { local secs="$1"; shift; "$@" & local pid=$!; ( sleep "$secs"; kill -9 "$pid" 2>/dev/null ) & local w=$!; wait "$pid" 2>/dev/null; local rc=$?; kill "$w" 2>/dev/null; wait "$w" 2>/dev/null; return $rc; }
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CF="$HERE/bin/cfence"
 PASS=0; FAIL=0
 
-T="$(mktemp -d)" || exit 1; trap 'rm -rf "$T"' EXIT
+T="$(mktemp -d)" || exit 1; T="$(cd "$T" && pwd -P)"; trap 'rm -rf "$T"' EXIT
 export HOME="$T/home"; mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents" "$T/fakebin"
 unset CLAUDE_CONFIG_DIR CFENCE_PROFILE CFENCE_PID TMUX TMUX_PANE XDG_CONFIG_HOME XDG_DATA_HOME CFENCE_PROFILES_DIR CFENCE_FORCE CFENCE_NO_TMUX GIT_DIR GIT_WORK_TREE
 export SHELL=/bin/bash
@@ -166,8 +167,8 @@ code 3 "L5 cfence env refuses cross-account inside a fence" bash -c "cd '$T/s/fe
 echo "[review regressions]"
 # shim recursion: a cfence shim reachable via another PATH dir must not loop forever
 $CF init --no-rc >/dev/null; mkdir -p "$T/o"; ln -sf "$SHIM/claude" "$T/o/claude"
-out="$(cd "$T/w/proj-x" && PATH="$T/o:/usr/bin:/bin" timeout 5 "$CF" run -- x 2>&1)"; rc=$?
-[[ $rc -ne 124 && "$out" == *"shim"* ]] && ok "shim reached via other dir => error, no infinite loop" || bad "recursion guard" "rc=$rc $out"
+out="$(cd "$T/w/proj-x" && PATH="$T/o:/usr/bin:/bin" with_timeout 5 "$CF" run -- x 2>&1)"; rc=$?
+[[ $rc -ne 137 && "$out" == *"shim"* ]] && ok "shim reached via other dir => error, no infinite loop" || bad "recursion guard" "rc=$rc $out"
 # config/bindings last line without trailing newline
 printf 'personal %s' "$T/w/proj-x" >> "$HOME/.config/cfence/bindings"
 eq "binding on last line without newline is honoured" "$(cd "$T/w/proj-x" && $CF which -q)" "personal"
@@ -175,6 +176,9 @@ $CF unbind "$T/w/proj-x" >/dev/null
 # unbind of a directory that no longer exists
 mkdir -p "$T/w/gone"; $CF bind personal "$T/w/gone" >/dev/null; rm -rf "$T/w/gone"
 $CF unbind "$T/w/gone" >/dev/null 2>&1; eq "unbind works for deleted dir" "$(grep -c -F "$T/w/gone" "$HOME/.config/cfence/bindings" || true)" "0"
+# unbind of a deleted dir reached through a symlinked parent (macOS: /var -> /private/var)
+mkdir -p "$T/realp/d"; ln -sfn "$T/realp" "$T/linkp"; $CF bind personal "$T/linkp/d" >/dev/null; rm -rf "$T/realp/d"
+$CF unbind "$T/linkp/d" >/dev/null 2>&1; eq "unbind deleted dir under a symlinked parent" "$(grep -c -F "realp/d" "$HOME/.config/cfence/bindings" || true)" "0"
 # sync failure must never block launch
 $CF mcp share plane >/dev/null; echo '{ broken' > "$P/personal/.claude.json"; rm -f "$P/personal/.cfence-mcp-stamp"
 out="$(cd "$T/w/proj" && $CF run -- hi 2>&1)"; has "corrupt profile json does not block launch" "$out" "FAKE"
@@ -196,7 +200,7 @@ cp "$T/main.bak" "$HOME/.claude.json"
 # non-tty init without --yes must not edit rc files
 : > "$HOME/.bashrc"; SHELL=/bin/bash $CF init --no-rc >/dev/null; SHELL=/bin/bash $CF init </dev/null >/dev/null 2>&1
 eq "init without --yes and without a tty leaves rc untouched" "$(wc -c < "$HOME/.bashrc" | tr -d ' ')" "0"
-SHELL=/bin/bash $CF init --yes >/dev/null 2>&1; has "init --yes writes PATH block" "$(cat "$HOME/.bashrc")" "$SHIM"
+SHELL=/bin/bash $CF init --yes >/dev/null 2>&1; has "init --yes writes PATH block" "$(cat "$HOME/.bashrc" "$HOME/.bash_profile" 2>/dev/null)" "$SHIM"
 printf '#!/bin/sh\nexit 7\n' > "$T/fakebin/claude"
 if command -v tmux >/dev/null; then
   S2="cfence-t2-$$"; tmux -L "$S2" -f /dev/null new-session -d -s t 2>/dev/null
