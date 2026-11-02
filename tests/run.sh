@@ -288,6 +288,31 @@ hasnt "no WSL output on plain Linux" "$out" "WSL detected"; hasnt "no Windows-dr
 out="$(CFENCE_PROC_VERSION="$T/procv" CFENCE_PROFILES_DIR=/mnt/d/profiles $CF doctor 2>&1)"; has "doctor warns when profiles live on a Windows drive" "$out" "is on a Windows drive"
 cp "$T/bindings.bak" "$HOME/.config/cfence/bindings"
 
+echo "[same folder, different spelling]"
+mkdir -p "$T/c/real/sub/deep" "$T/c/other"; ln -sfn "$T/c/real" "$T/c/alias"
+cp "$HOME/.config/cfence/bindings" "$T/bindings.bak2"
+echo "personal $T/c/alias" >> "$HOME/.config/cfence/bindings"      # hand-edited, non-canonical spelling
+eq "binding written with another spelling still fences the folder" "$(cd "$T/c/real/sub/deep" && $CF which -q)" "personal"
+$CF bind main "$T/c/real/sub" >/dev/null
+eq "a deeper binding still beats the alias-spelled parent" "$(cd "$T/c/real/sub/deep" && $CF which -q)" "main"
+eq "the parent (alias-spelled binding) still applies above it" "$(cd "$T/c/real" && $CF which -q)" "personal"
+$CF unbind "$T/c/real/sub" >/dev/null
+$CF bind work_x "$T/c/real" >/dev/null 2>&1 || true
+$CF add dupe >/dev/null; $CF bind dupe "$T/c/real" >/dev/null
+eq "re-binding replaces the entry made under another spelling (no duplicates)" "$(grep -c -F "$T/c/" "$HOME/.config/cfence/bindings")" "1"
+eq "...and the new profile wins" "$(cd "$T/c/real/sub" && $CF which -q)" "dupe"
+echo "personal $T/c/alias" >> "$HOME/.config/cfence/bindings"
+$CF unbind "$T/c/real" >/dev/null
+eq "unbind removes every spelling of the folder" "$(grep -c -F "$T/c/" "$HOME/.config/cfence/bindings" || true)" "0"
+$CF remove dupe --yes >/dev/null
+# a case-insensitive filesystem (default APFS): the same folder typed in another case must stay fenced
+mkdir -p "$T/ci/Proj"; ALT="$T/ci/pROJ"
+if [[ -d "$ALT" ]]; then
+  $CF bind personal "$T/ci/Proj" >/dev/null
+  eq "case-insensitive fs: other-case spelling of a fenced folder is still fenced" "$(cd "$ALT" && $CF which -q)" "personal"
+else ok "(skipped: this filesystem is case-sensitive; the symlink tests above cover the same mechanism)"; fi
+cp "$T/bindings.bak2" "$HOME/.config/cfence/bindings"
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]
