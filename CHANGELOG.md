@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `cfence rename <old> <new>`: renames a profile and carries its shim and directory bindings along (rolls back if bindings cannot be updated).
 - `cfence completion bash|zsh|fish`: tab-completion for commands, profile names and directories.
 
 ## 0.1.0 — 2026-11-02

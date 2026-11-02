@@ -308,6 +308,29 @@ cmd_remove() {
   echo "✓ removed '$name' (symlinked shared files in ~/.claude were not touched; its bindings were dropped)"
 }
 
+cmd_rename() {
+  local old="${1:-}" new="${2:-}"; [[ -n "$old" && -n "$new" && $# -eq 2 ]] || die "usage: cfence rename <old> <new>"
+  valid_name "$old"; valid_name "$new"
+  [[ "$old" != "$MAIN_NAME" ]] || die "'$MAIN_NAME' is the built-in default (~/.claude) and cannot be renamed"
+  [[ "$new" != "$MAIN_NAME" ]] || die "'$MAIN_NAME' is reserved"
+  [[ -d "$PROFILES_DIR/$old" ]] || die "no such profile '$old'"
+  [[ ! -e "$PROFILES_DIR/$new" ]] || die "profile '$new' already exists"
+  [[ -r "$BINDINGS" || ! -e "$BINDINGS" ]] || die "cannot read $BINDINGS — refusing to guess (fail closed)" 3
+  mv -- "$PROFILES_DIR/$old" "$PROFILES_DIR/$new" || die "could not move the profile directory"
+  if [[ -s "$BINDINGS" ]]; then   # rewrite the first field only; paths may contain spaces
+    awk -v o="$old" -v n="$new" '$1==o { sub(/^[^ ]+/, n) } 1' "$BINDINGS" > "$BINDINGS.tmp" && mv "$BINDINGS.tmp" "$BINDINGS" \
+      || { mv -- "$PROFILES_DIR/$new" "$PROFILES_DIR/$old"; die "could not update bindings; rename rolled back"; }
+  fi
+  rm -f -- "$SHIM_DIR/claude-$old"; write_shim "claude-$new" "$new"
+  echo "✓ renamed '$old' -> '$new'  (shim: claude-$new, bindings updated)"
+  if grep -lF -- "$PROFILES_DIR/$old" "$PROFILES_DIR/$new"/.claude.json "$PROFILES_DIR/$new"/*.json 2>/dev/null | grep -q .; then
+    echo "  ! some files still mention the old path ($PROFILES_DIR/$old); run 'cfence login $new' if anything looks signed out"
+  fi
+  [[ "$(uname)" == Darwin ]] && echo "  ! macOS may key the saved login to the config path: if '$new' asks you to sign in, run: cfence login $new"
+  echo "  note: Claude sessions already running under '$old' keep working, but new ones started from inside them will not find it."
+  return 0
+}
+
 cmd_login() {
   local name="${1:-}"; [[ -n "$name" ]] || die "usage: cfence login <name>"
   profile_exists "$name" || die "no such profile '$name'"
@@ -497,6 +520,7 @@ SETUP
                                 new profile. --share-state also shares sessions,
                                 memory & history with main (use for same-org accounts)
   login <name>                  sign the profile in (opens the browser)
+  rename <old> <new>            rename a profile (shim + bindings follow)
   remove <name> --yes           delete a profile (login + private data)
 
 DAILY
@@ -524,10 +548,10 @@ cmd_completion() {
     bash) cat <<'EOS'
 _cfence() {
   local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}" cmd="${COMP_WORDS[1]:-}"
-  local cmds="init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+  local cmds="init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
   if (( COMP_CWORD == 1 )); then COMPREPLY=( $(compgen -W "$cmds" -- "$cur") ); return; fi
   case "$cmd" in
-    login|remove|rm|env) COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") );;
+    login|remove|rm|rename|mv|env) COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") );;
     bind) if (( COMP_CWORD == 2 )); then COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ); else COMPREPLY=( $(compgen -d -- "$cur") ); fi;;
     unbind) COMPREPLY=( $(compgen -d -- "$cur") );;
     run) [[ "$prev" == -p || "$prev" == --profile ]] && COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ) || COMPREPLY=( $(compgen -W "-p --force --" -- "$cur") );;
@@ -544,10 +568,10 @@ EOS
 _cfence() {
   local -a profiles; profiles=(${(f)"$(cfence _profiles 2>/dev/null)"})
   if (( CURRENT == 2 )); then
-    _values 'command' init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help; return
+    _values 'command' init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help; return
   fi
   case "${words[2]}" in
-    login|remove|rm|env) _describe 'profile' profiles;;
+    login|remove|rm|rename|mv|env) _describe 'profile' profiles;;
     bind) if (( CURRENT == 3 )); then _describe 'profile' profiles; else _files -/; fi;;
     unbind) _files -/;;
     run) if [[ "${words[CURRENT-1]}" == (-p|--profile) ]]; then _describe 'profile' profiles; else _values 'option' -p --force --; fi;;
@@ -561,8 +585,8 @@ EOS
     ;;
     fish) cat <<'EOS'
 complete -c cfence -f
-complete -c cfence -n __fish_use_subcommand -a "init add remove login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
-complete -c cfence -n '__fish_seen_subcommand_from login remove rm env' -a "(cfence _profiles 2>/dev/null)"
+complete -c cfence -n __fish_use_subcommand -a "init add remove rename login list bind unbind bindings which env run mcp sync doctor uninstall completion version help"
+complete -c cfence -n '__fish_seen_subcommand_from login remove rm rename mv env' -a "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from bind' -a "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from run' -s p -l profile -xa "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from run' -l force
@@ -577,7 +601,7 @@ EOS
 
 sub="${1:-help}"; shift || true
 case "$sub" in
-  init) cmd_init "$@";; add) cmd_add "$@";; remove|rm) cmd_remove "$@";; login) cmd_login "$@";;
+  init) cmd_init "$@";; add) cmd_add "$@";; remove|rm) cmd_remove "$@";; rename|mv) cmd_rename "$@";; login) cmd_login "$@";;
   list|ls) cmd_list;; bind) cmd_bind "$@";; unbind) cmd_unbind "$@";; bindings) cmd_bindings;;
   which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; mcp) cmd_mcp "$@";;
   sync) sync_all; write_all_shims; echo "✓ synced";; doctor) cmd_doctor;; uninstall) cmd_uninstall;;

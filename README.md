@@ -67,6 +67,7 @@ Your existing `~/.claude` login is the built-in profile **`main`** — untouched
 | `cfence bind <profile> [dir]` · `unbind [dir]` · `bindings` | Manage fences. |
 | `cfence env [name] [--fish]` | Print `export CLAUDE_CONFIG_DIR=…` for IDEs/other tools: `eval "$(cfence env personal)"` (honours fences). |
 | `cfence mcp share|unshare|list|sync` | Shared MCP registry. |
+| `cfence rename <old> <new>` | Rename a profile; its shim and every directory binding follow. |
 | `cfence remove <name> --yes` | Delete a profile (login + private data). Shared files and main are never touched. |
 | `cfence completion bash\|zsh\|fish` | Print a shell completion script. |
 | `cfence doctor` | Diagnose PATH, shims, modes, diverged files, stale bindings, tmux env leaks. |
