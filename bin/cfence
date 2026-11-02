@@ -120,8 +120,19 @@ pyj() { need_python; python3 -I -c "$PY" "$@"; }
 
 # ───────────────────────── bindings ─────────────────────────
 BOUND_PROFILE=""; BOUND_PATH=""
-resolve_bound() { # sets BOUND_PROFILE/BOUND_PATH for the longest binding that is a prefix of $1
-  local dir="$1" prof path bestlen=0
+same_dir() { [[ -d "$1" && -d "$2" && "$1" -ef "$2" ]]; }   # same inode, whatever the spelling (case-insensitive fs, bind mounts, symlinks)
+covers() { # does binding $1 cover directory $2? sets COVER_LEN to the length of the matching ancestor of $2
+  local path="$1" dir="$2" a="$2"
+  if [[ "$path" == "/" || "$dir" == "$path" || "$dir" == "$path"/* ]]; then COVER_LEN=${#path}; [[ "$path" == "/" ]] && COVER_LEN=1; return 0; fi
+  [[ -d "$path" ]] || return 1
+  while [[ "$a" == /?* ]]; do   # walk up, comparing by inode: catches another spelling of the same folder
+    if [[ "$a" -ef "$path" ]]; then COVER_LEN=${#a}; return 0; fi
+    a="${a%/*}"; [[ -n "$a" ]] || a="/"
+  done
+  return 1
+}
+resolve_bound() { # sets BOUND_PROFILE/BOUND_PATH for the deepest binding that covers $1 (later lines win ties)
+  local dir="$1" prof path bestlen=0 COVER_LEN=0
   BOUND_PROFILE=""; BOUND_PATH=""
   [[ -f "$BINDINGS" ]] || return 0
   [[ ! -e "$BINDINGS" || -r "$BINDINGS" ]] || die "cannot read $BINDINGS — refusing to guess (fail closed)" 3
@@ -130,8 +141,8 @@ resolve_bound() { # sets BOUND_PROFILE/BOUND_PATH for the longest binding that i
     [[ -z "$line" || "$line" == \#* || "$line" != *" "* ]] && continue
     prof="${line%% *}"; path="${line#* }"
     [[ "$prof" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || continue
-    if [[ "$path" == "/" || "$dir" == "$path" || "$dir" == "$path"/* ]] && (( ${#path} > bestlen )); then
-      BOUND_PROFILE="$prof"; BOUND_PATH="$path"; bestlen=${#path}
+    if covers "$path" "$dir" && (( COVER_LEN >= bestlen )); then
+      BOUND_PROFILE="$prof"; BOUND_PATH="$path"; bestlen=$COVER_LEN
     fi
   done < "$BINDINGS"
   return 0
@@ -353,12 +364,20 @@ cmd_list() {
   done < <(profile_names)
 }
 
+bindings_without() { # print BINDINGS minus every entry for directory $1 (same string or same inode)
+  local dir="$1" line path
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    path="${line#* }"
+    if [[ "$line" == *" "* && ( "$path" == "$dir" ) ]] || { [[ "$line" == *" "* && "$line" != \#* ]] && same_dir "$path" "$dir"; }; then continue; fi
+    printf '%s\n' "$line"
+  done < "$BINDINGS"
+}
 cmd_bind() {
   local name="${1:-}" dir; [[ -n "$name" ]] || die "usage: cfence bind <profile> [dir]"
   profile_exists "$name" || die "no such profile '$name'"
   dir="$(canon_dir "${2:-$PWD}")"
   mkdir -p "$CONF_DIR"; touch "$BINDINGS"
-  { P="$dir" awk '{ s=$0; sub(/^[^ ]+ /,"",s); if (s!=ENVIRON["P"]) print }' "$BINDINGS"; echo "$name $dir"; } > "$BINDINGS.tmp"
+  { bindings_without "$dir"; echo "$name $dir"; } > "$BINDINGS.tmp"
   mv "$BINDINGS.tmp" "$BINDINGS"
   echo "✓ $dir -> $name   (applies to subdirectories and git worktrees of this repo)"
 }
@@ -367,7 +386,7 @@ cmd_unbind() {
   if [[ -d "$dir" ]]; then dir="$(canon_dir "$dir")"
   elif [[ -d "$(dirname "$dir")" ]]; then dir="$(canon_dir "$(dirname "$dir")")/$(basename "$dir")"   # deleted dir: canonicalise its parent (macOS /var -> /private/var)
   fi
-  P="$dir" awk '{ s=$0; sub(/^[^ ]+ /,"",s); if (s!=ENVIRON["P"]) print }' "$BINDINGS" > "$BINDINGS.tmp"; mv "$BINDINGS.tmp" "$BINDINGS"
+  bindings_without "$dir" > "$BINDINGS.tmp"; mv "$BINDINGS.tmp" "$BINDINGS"
   echo "✓ unbound $dir"
 }
 cmd_bindings() { if [[ -s "$BINDINGS" ]]; then sort -k2 "$BINDINGS"; else echo "(no bindings)"; fi; }
@@ -512,7 +531,7 @@ cmd_doctor() {
       profile_exists "$prof" || no "binding '$path' -> missing profile '$prof' (launching there will refuse)"
       [[ -d "$path" ]] || wn "binding path no longer exists: $path"
       if is_wsl && on_win_mount "$path"; then
-        wn "binding '$path' is on a Windows drive: paths there can be case-insensitive, so another spelling of the same folder may escape the fence — keep fenced projects in the Linux filesystem"
+        wn "binding '$path' is on a Windows drive: symlinks/permissions are unreliable there — keep fenced projects in the Linux filesystem"
       fi
     done < "$BINDINGS"
     ok "bindings checked"

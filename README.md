@@ -108,7 +108,7 @@ cfence launch -p personal -- idea .
 
 cfence is a bash tool, so **native Windows (PowerShell/cmd) is not supported**. **WSL2 is expected to work**: it is a real Linux userland, and cfence's Linux test suite is what runs in CI. It has not been run on WSL itself yet, so treat it as unverified and please report what you find.
 
-- Install and run cfence **inside** the WSL distro (`./install.sh` there), and keep `~` and your fenced projects in the **Linux filesystem** (`~/projects/...`), not under `/mnt/c/...`. Windows drives have unreliable symlinks and permissions and can be case-insensitive, so another spelling of the same folder may escape a fence. `cfence doctor` detects WSL and warns about this.
+- Install and run cfence **inside** the WSL distro (`./install.sh` there), and keep `~` and your fenced projects in the **Linux filesystem** (`~/projects/...`), not under `/mnt/c/...`. Windows drives have unreliable symlinks and permissions. `cfence doctor` detects WSL and warns about this.
 - `claude` in the WSL terminal and in tmux behaves exactly as on Linux.
 - VS Code on Windows connected to WSL (Remote - WSL): `cfence launch code .` from WSL starts the Windows app, whose remote server may be an already-running process; see the IDE limits above. Unverified.
 
@@ -169,6 +169,7 @@ claude ──▶ shim ──▶ cfence run ──▶ picks profile ──▶ exe
 | Situation | Behaviour |
 |---|---|
 | Asking for account B inside a directory fenced to A | Refused (exit 3). Override only with the explicit `--force` flag (deliberately **not** settable via environment). |
+| Same folder, another spelling (`~/Work` vs `~/work` on case-insensitive macOS/Windows drives, bind mounts, a hand-edited non-canonical path) | Fences match by **inode**, not just by string, so every spelling of a fenced folder is fenced. Re-binding or unbinding replaces/removes all spellings. |
 | Fence points at a deleted/renamed profile | Refused — **never** falls back to `main`. |
 | `CLAUDE_CONFIG_DIR` leaked into your shell / tmux server | Ignored by `claude` (cfence always sets or unsets it explicitly); `doctor` warns about it. |
 | `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` etc. in the environment (they outrank the profile login) | Stripped (with a warning) inside fenced directories; `doctor` warns about them elsewhere. |
