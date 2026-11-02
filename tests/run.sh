@@ -266,11 +266,14 @@ code 3 "launch refuses a profile that contradicts the fence" bash -c "cd '$T/s/f
 out="$(cd "$T/s/fenced/proj" && PATH="$T/fakebin:$PATH" $CF launch --force -p lprof -- fakeapp 2>/dev/null)"; has "launch --force overrides" "$out" "cfg=$P/lprof"
 code 127 "launch of a missing command fails" $CF launch -- definitely-not-a-command-xyz
 code 2 "launch without a command is a usage error" $CF launch
-cp "$(command -v sleep)" "$T/fakebin/cursor"
+printf '#!/bin/sh\nexit 0\n' > "$T/fakebin/cursor"; chmod +x "$T/fakebin/cursor"
 out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- cursor 0 2>&1)"
 hasnt "no 'already running' warning when the IDE is not running" "$out" "already running"
-cp "$(command -v sleep)" "$T/fakebin/zed"; "$T/fakebin/zed" 20 & IDEPID=$!; sleep 0.3
-out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- zed 0 2>&1)"; has "warns when the IDE is already running" "$out" "already running"
+mkdir -p "$T/ide"; printf '#!/bin/sh\nsleep 20\n' > "$T/ide/zed"; printf '#!/bin/sh\nexit 0\n' > "$T/fakebin/zed"; chmod +x "$T/ide/zed" "$T/fakebin/zed"
+"$T/ide/zed" & IDEPID=$!; sleep 0.5
+if pgrep -x zed >/dev/null 2>&1; then
+  out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- zed 2>&1)"; has "warns when the IDE is already running" "$out" "already running"
+else ok "(skipped: this OS cannot see the fake editor by name)"; fi
 kill "$IDEPID" 2>/dev/null; wait "$IDEPID" 2>/dev/null
 
 $CF remove lprof --yes >/dev/null
