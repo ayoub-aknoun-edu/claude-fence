@@ -418,7 +418,7 @@ cmd_env() { # cfence env [name] -> eval "$(cfence env personal)" for IDEs / othe
   local fish=0; [[ "$(basename "${SHELL:-}")" == fish || "${2:-}" == "--fish" || "${3:-}" == "--fish" ]] && fish=1
   if [[ "$name" == "$MAIN_NAME" ]]; then (( fish )) && echo "set -e CLAUDE_CONFIG_DIR" || echo "unset CLAUDE_CONFIG_DIR"
   else
-    if (( fish )); then local q; q="$(profile_dir "$name")"; q="${q//\\/\\\\}"; q="${q//\'/\\\'}"; printf "set -gx CLAUDE_CONFIG_DIR '%s'\n" "$q"
+    if (( fish )); then local q; q="$(profile_dir "$name" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")"; printf "set -gx CLAUDE_CONFIG_DIR '%s'\n" "$q"   # sed: bash<5.2 mangles ${var//\'/..} in double quotes
     else printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(profile_dir "$name")"; fi
   fi
 }

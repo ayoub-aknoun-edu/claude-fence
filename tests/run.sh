@@ -327,7 +327,7 @@ if command -v fish >/dev/null 2>&1; then
   [[ ! -f "$HOME/.local/share/fish/fish_variables" ]] || ! grep -q cfence "$HOME/.local/share/fish/fish_variables" && ok "fish: nothing cfence-related persists in fish_variables" || bad "fish_variables polluted"
   out="$(cd "$T/w/proj" && fish -c 'claude x' 2>/dev/null)"; has "fish: running claude goes through cfence" "$out" "FAKE"
   # profile dir containing a space and a quote must survive `cfence env --fish`
-  SP="$T/we ird'dir"; mkdir -p "$SP"; CFENCE_PROFILES_DIR="$SP" $CF add quoted >/dev/null 2>&1
+  SP="$T/we ird'd\\ir"; mkdir -p "$SP"; CFENCE_PROFILES_DIR="$SP" $CF add quoted >/dev/null 2>&1
   eq "fish: cfence env --fish quotes awkward paths" "$(CFENCE_PROFILES_DIR="$SP" $CF env quoted --fish | fish -c 'source; echo $CLAUDE_CONFIG_DIR' 2>/dev/null)" "$SP/quoted"
   CFENCE_PROFILES_DIR="$SP" $CF remove quoted --yes >/dev/null 2>&1; rm -rf "$SP"
   eq "fish: cfence env main unsets the variable" "$(CLAUDE_CONFIG_DIR=/x $CF env main --fish | fish -c 'set -gx CLAUDE_CONFIG_DIR /x; source; echo "[$CLAUDE_CONFIG_DIR]"' 2>/dev/null)" "[]"
