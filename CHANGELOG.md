@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `doctor` detects WSL and warns when profiles or fenced directories are on a Windows drive (`/mnt/<x>/`). README documents WSL2 support (unverified) and that native Windows is unsupported.
 - `cfence launch [-p name] [--force] -- <cmd>`: start an editor or any app under the directory's profile, with the same fence rules as `claude`; warns when a known editor is already running (it would reuse that process).
 - `cfence statusline`: profile segment for Claude Code's `statusLine` (reads the real `CLAUDE_CONFIG_DIR`; colour or `--plain`; never fails or blocks).
 - `cfence rename <old> <new>`: renames a profile and carries its shim and directory bindings along (rolls back if bindings cannot be updated).

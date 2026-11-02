@@ -278,6 +278,16 @@ kill "$IDEPID" 2>/dev/null; wait "$IDEPID" 2>/dev/null
 
 $CF remove lprof --yes >/dev/null
 
+echo "[wsl]"
+printf 'Linux version 5.15.153.1-microsoft-standard-WSL2 (root@x)\n' > "$T/procv"; printf 'Linux version 6.1.0-generic (builder)\n' > "$T/procv-plain"
+cp "$HOME/.config/cfence/bindings" "$T/bindings.bak"; echo "personal /mnt/c/Users/x/proj" >> "$HOME/.config/cfence/bindings"
+out="$(CFENCE_PROC_VERSION="$T/procv" $CF doctor 2>&1)"
+has "doctor detects WSL" "$out" "WSL detected"; has "doctor warns about a fence on a Windows drive" "$out" "Windows drive"
+out="$(CFENCE_PROC_VERSION="$T/procv-plain" $CF doctor 2>&1)"
+hasnt "no WSL output on plain Linux" "$out" "WSL detected"; hasnt "no Windows-drive warning on plain Linux" "$out" "Windows drive"
+out="$(CFENCE_PROC_VERSION="$T/procv" CFENCE_PROFILES_DIR=/mnt/d/profiles $CF doctor 2>&1)"; has "doctor warns when profiles live on a Windows drive" "$out" "is on a Windows drive"
+cp "$T/bindings.bak" "$HOME/.config/cfence/bindings"
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]

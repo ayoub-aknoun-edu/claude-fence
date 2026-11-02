@@ -104,6 +104,14 @@ cfence launch -p personal -- idea .
 - Launching from a desktop icon, Spotlight or the Dock bypasses cfence entirely; make a launcher that calls `cfence launch`, or start the editor from a terminal.
 - The extension reading `CLAUDE_CONFIG_DIR` from the editor's environment is expected, but not yet verified for every editor/version. If an extension shows the wrong account, tell us (`cfence doctor` output + editor version).
 
+### Windows (WSL2)
+
+cfence is a bash tool, so **native Windows (PowerShell/cmd) is not supported**. **WSL2 is expected to work**: it is a real Linux userland, and cfence's Linux test suite is what runs in CI. It has not been run on WSL itself yet, so treat it as unverified and please report what you find.
+
+- Install and run cfence **inside** the WSL distro (`./install.sh` there), and keep `~` and your fenced projects in the **Linux filesystem** (`~/projects/...`), not under `/mnt/c/...`. Windows drives have unreliable symlinks and permissions and can be case-insensitive, so another spelling of the same folder may escape a fence. `cfence doctor` detects WSL and warns about this.
+- `claude` in the WSL terminal and in tmux behaves exactly as on Linux.
+- VS Code on Windows connected to WSL (Remote - WSL): `cfence launch code .` from WSL starts the Windows app, whose remote server may be an already-running process; see the IDE limits above. Unverified.
+
 ### Claude statusline
 
 Show which account a session is really running under, inside Claude Code itself. `cfence statusline` reads the session's `CLAUDE_CONFIG_DIR`, so it is correct even when you forced another profile. Add to `~/.claude/settings.json` (shared by every profile, so one edit covers all of them):
@@ -121,7 +129,7 @@ printf '%s ' "$(cfence statusline </dev/null)"
 printf '%s' "$input" | your-existing-statusline
 ```
 
-`--plain` (or `NO_COLOR=1`) prints `[name]` without colour. It never fails and never blocks on stdin.
+The statusline is shown by the terminal UI; the VS Code extension does not display it (confirmed with `cfence launch code`: the extension itself shows the account, the segment does not appear). `--plain` (or `NO_COLOR=1`) prints `[name]` without colour. It never fails and never blocks on stdin.
 
 ### tmux
 
