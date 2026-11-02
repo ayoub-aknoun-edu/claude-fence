@@ -466,12 +466,21 @@ cmd_mcp() {
   esac
 }
 
+is_wsl() { grep -qi microsoft "${CFENCE_PROC_VERSION:-/proc/version}" 2>/dev/null; }
+on_win_mount() { [[ "$1" == /mnt/[a-zA-Z] || "$1" == /mnt/[a-zA-Z]/* ]]; }   # WSL: a Windows drive (drvfs/9p)
+
 cmd_doctor() {
   local bad=0 n d it f
   ok()  { echo "  ✓ $*"; }
   no()  { echo "  ✗ $*"; bad=1; }
   wn()  { echo "  ! $*"; }
   echo "cfence $CFENCE_VERSION doctor"
+  if is_wsl; then
+    ok "WSL detected"
+    for d in "$MAIN_DIR" "$PROFILES_DIR"; do
+      on_win_mount "$d" && wn "$d is on a Windows drive: symlinks and chmod 700 are unreliable there — keep it in the Linux filesystem (under ~)"
+    done
+  fi
   command -v python3 >/dev/null && ok "python3 present" || no "python3 missing (needed for JSON ops)"
   if f="$(real_claude 2>/dev/null)"; then ok "real claude: $f"; else no "real claude not found"; fi
   f="$(command -v claude 2>/dev/null || true)"
@@ -502,6 +511,9 @@ cmd_doctor() {
       [[ -z "${prof:-}" || "$prof" == \#* ]] && continue
       profile_exists "$prof" || no "binding '$path' -> missing profile '$prof' (launching there will refuse)"
       [[ -d "$path" ]] || wn "binding path no longer exists: $path"
+      if is_wsl && on_win_mount "$path"; then
+        wn "binding '$path' is on a Windows drive: paths there can be case-insensitive, so another spelling of the same folder may escape the fence — keep fenced projects in the Linux filesystem"
+      fi
     done < "$BINDINGS"
     ok "bindings checked"
   fi
