@@ -8,3 +8,5 @@ Thanks for helping! The project is one bash script (`bin/cfence`), an installer 
 - **Manual testing:** `HOME=$(mktemp -d)` is **not** enough — unset `XDG_CONFIG_HOME`/`XDG_DATA_HOME` too, or you will write to your real cfence config.
 - **Design rules:** never `source` user files; validate every profile name and path that reaches the filesystem; refuse rather than fall back to another account; keep `claude` the foreground process (no lingering wrapper).
 - Conventional commit messages (`feat:`, `fix:`, `docs:`, `test:`).
+
+- **Demo GIF:** `assets/demo.gif` is generated, not hand-made: `python3 contrib/demo/record.py out/` writes a cast from a real shell session in a throwaway `$HOME` with a fake `claude`; render it with [agg](https://github.com/asciinema/agg) (`agg out/demo.cast assets/demo.gif --theme dracula --font-size 18 --speed 1.5 --idle-time-limit 2`).

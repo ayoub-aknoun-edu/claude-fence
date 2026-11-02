@@ -8,6 +8,8 @@
 ~/work/acme-api   $ claude-personal   # ✗ fenced to 'work2' but 'personal' was requested. Use --force …
 ```
 
+<p align="center"><img src="assets/demo.gif" alt="cfence demo: each directory uses its own Claude account; the wrong one is refused" width="760"></p>
+
 If you have a personal plan *and* one or more company accounts, you have probably hit one of these:
 
 - you `/logout` + `/login` all day, and forget which account you're on;
