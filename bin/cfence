@@ -277,7 +277,8 @@ setup_rc() {
   rc="$(rc_file_for_shell)"
   if [[ -z "$rc" ]]; then info "Add this to your shell startup file manually:  export PATH=\"$SHIM_DIR:\$PATH\""; return; fi
   if [[ -f "$rc" ]] && grep -qF "$RC_BEGIN" "$rc"; then echo "✓ PATH block already in $rc"; return; fi
-  if [[ "$(basename "$rc")" == "config.fish" ]]; then line="fish_add_path -m \"$SHIM_DIR\""; else line="export PATH=\"$SHIM_DIR:\$PATH\""; fi
+  # fish: session-scoped (nothing persists in fish_variables), idempotent, works before fish 3.2 (no fish_add_path)
+  if [[ "$(basename "$rc")" == "config.fish" ]]; then line="set -gx PATH \"$SHIM_DIR\" (string match -v -- \"$SHIM_DIR\" \$PATH)"; else line="export PATH=\"$SHIM_DIR:\$PATH\""; fi
   if (( ! yes )); then
     if [[ -t 0 ]]; then read -r -p "Add the cfence shim dir to PATH in $rc? [Y/n] " ans || ans=n; else ans=n; fi
   fi
@@ -416,7 +417,10 @@ cmd_env() { # cfence env [name] -> eval "$(cfence env personal)" for IDEs / othe
   [[ -z "$BOUND_PROFILE" || "$BOUND_PROFILE" == "$name" || "${2:-}" == "--force" ]] || die "$BOUND_PATH is fenced to '$BOUND_PROFILE'; refusing to emit '$name' (add --force to override)" 3
   local fish=0; [[ "$(basename "${SHELL:-}")" == fish || "${2:-}" == "--fish" || "${3:-}" == "--fish" ]] && fish=1
   if [[ "$name" == "$MAIN_NAME" ]]; then (( fish )) && echo "set -e CLAUDE_CONFIG_DIR" || echo "unset CLAUDE_CONFIG_DIR"
-  else (( fish )) && printf 'set -gx CLAUDE_CONFIG_DIR %s\n' "$(profile_dir "$name")" || printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(profile_dir "$name")"; fi
+  else
+    if (( fish )); then local q; q="$(profile_dir "$name")"; q="${q//\\/\\\\}"; q="${q//\'/\\\'}"; printf "set -gx CLAUDE_CONFIG_DIR '%s'\n" "$q"
+    else printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(profile_dir "$name")"; fi
+  fi
 }
 
 run_common() { # RUN_MODE=claude: exec the real claude | RUN_MODE=launch: exec any command under the resolved profile
@@ -549,6 +553,9 @@ cmd_uninstall() {
     awk -v b="$RC_BEGIN" -v e="$RC_END" '$0==b{s=1;next} $0==e{s=0;next} !s' "$rc" > "$tmp" && cat "$tmp" > "$rc"; rm -f "$tmp"
     echo "✓ removed PATH block from $rc (backup: $rc.cfence-bak)"
   done
+  if command -v fish >/dev/null 2>&1; then   # older cfence versions used `fish_add_path`, which persists in a universal variable
+    fish -c 'set -l i (contains -i -- "$argv[1]" $fish_user_paths); and set -e fish_user_paths[$i]' "$SHIM_DIR" >/dev/null 2>&1 || true
+  fi
   rm -rf -- "$SHIM_DIR"; echo "✓ removed shims"
   echo "Kept (delete by hand if you want): $CONF_DIR (bindings/config), $PROFILES_DIR (logins + data), the cfence binary itself."
 }

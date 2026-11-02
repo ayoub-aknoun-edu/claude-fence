@@ -313,6 +313,35 @@ if [[ -d "$ALT" ]]; then
 else ok "(skipped: this filesystem is case-sensitive; the symlink tests above cover the same mechanism)"; fi
 cp "$T/bindings.bak2" "$HOME/.config/cfence/bindings"
 
+echo "[fish]"
+if command -v fish >/dev/null 2>&1; then
+  FPATH_BASE="$PATH"; FISHCFG="$HOME/.config/fish/config.fish"; rm -f "$FISHCFG"
+  $CF init --no-rc >/dev/null
+  SHELL="$(command -v fish)" $CF init --yes >/dev/null 2>&1
+  has "init writes a PATH block to config.fish for fish users" "$(cat "$FISHCFG" 2>/dev/null)" "set -gx PATH"
+  hasnt "the fish block does not use universal-scope fish_add_path" "$(cat "$FISHCFG")" "fish_add_path"
+  eq "fish: shim dir is first in PATH" "$(fish -c 'echo $PATH[1]' 2>/dev/null)" "$SHIM"
+  eq "fish: claude resolves to the shim" "$(fish -c 'type -p claude' 2>/dev/null)" "$SHIM/claude"
+  eq "fish: sourcing the config twice does not duplicate the entry" "$(fish -c "source $FISHCFG; source $FISHCFG; count (string match -- '$SHIM' \$PATH)" 2>/dev/null)" "1"
+  eq "fish: shim dir moves to the front when already present later in PATH" "$(PATH="$FPATH_BASE:$SHIM" fish -c 'echo $PATH[1]' 2>/dev/null)" "$SHIM"
+  [[ ! -f "$HOME/.local/share/fish/fish_variables" ]] || ! grep -q cfence "$HOME/.local/share/fish/fish_variables" && ok "fish: nothing cfence-related persists in fish_variables" || bad "fish_variables polluted"
+  out="$(cd "$T/w/proj" && fish -c 'claude x' 2>/dev/null)"; has "fish: running claude goes through cfence" "$out" "FAKE"
+  # profile dir containing a space and a quote must survive `cfence env --fish`
+  SP="$T/we ird'dir"; mkdir -p "$SP"; CFENCE_PROFILES_DIR="$SP" $CF add quoted >/dev/null 2>&1
+  eq "fish: cfence env --fish quotes awkward paths" "$(CFENCE_PROFILES_DIR="$SP" $CF env quoted --fish | fish -c 'source; echo $CLAUDE_CONFIG_DIR' 2>/dev/null)" "$SP/quoted"
+  CFENCE_PROFILES_DIR="$SP" $CF remove quoted --yes >/dev/null 2>&1; rm -rf "$SP"
+  eq "fish: cfence env main unsets the variable" "$(CLAUDE_CONFIG_DIR=/x $CF env main --fish | fish -c 'set -gx CLAUDE_CONFIG_DIR /x; source; echo "[$CLAUDE_CONFIG_DIR]"' 2>/dev/null)" "[]"
+  has "fish completions offer profile names" "$(fish -c "$($CF completion fish)"$'\n''complete -C "cfence login "' 2>/dev/null | tr '\n' ' ')" "main"
+  has "fish completions offer subcommands" "$(fish -c "$($CF completion fish)"$'\n''complete -C "cfence lau"' 2>/dev/null)" "launch"
+  # a stale universal entry left by older cfence versions is removed by uninstall
+  fish -c "fish_add_path -m $SHIM" >/dev/null 2>&1
+  has "(setup) legacy universal entry present" "$(fish -c 'set -S fish_user_paths' 2>/dev/null)" "universal"
+  $CF uninstall >/dev/null 2>&1
+  hasnt "uninstall removes the legacy universal fish_user_paths entry" "$(fish -c 'echo $fish_user_paths' 2>/dev/null)" "$SHIM"
+  hasnt "uninstall removes the fish config block" "$(cat "$FISHCFG")" "cfence"
+  rm -f "$FISHCFG"; $CF init --no-rc >/dev/null
+else ok "(skipped: fish is not installed)"; fi
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]

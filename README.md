@@ -42,9 +42,9 @@ exec "$SHELL"           # pick up the new PATH
 cfence doctor           # everything should be ✓
 ```
 
-Options: `--prefix DIR`, `--copy` (copy instead of symlink), `--yes` (no prompts), `--no-rc` (don't touch rc files; add `export PATH="$HOME/.local/share/cfence/shims:$PATH"` yourself — shim dir **must come first**). Supports bash and zsh (fish: PATH line is generated but untested). Uninstall: `./uninstall.sh` (keeps your profiles and logins).
+Options: `--prefix DIR`, `--copy` (copy instead of symlink), `--yes` (no prompts), `--no-rc` (don't touch rc files; add `export PATH="$HOME/.local/share/cfence/shims:$PATH"` yourself — shim dir **must come first**). Supports bash, zsh and fish (fish is exercised in CI; its PATH line is session-scoped, so nothing persists after `uninstall`; for `--no-rc` on fish add `set -gx PATH $HOME/.local/share/cfence/shims (string match -v -- $HOME/.local/share/cfence/shims $PATH)`). Uninstall: `./uninstall.sh` (keeps your profiles and logins).
 
-Requirements: Claude Code, bash ≥ 3.2, python3. Linux is tested; macOS should work (bash-3.2-safe, BSD-aware) but is **untested** — reports welcome. Windows: use WSL.
+Requirements: Claude Code, bash ≥ 3.2, python3. The test suite runs in CI on Linux and on macOS (including stock bash 3.2); it has not been run on a real Mac desktop session or on WSL — reports welcome. Windows: use WSL.
 
 ## Quick start
 
