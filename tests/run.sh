@@ -243,6 +243,17 @@ code 1 "rename to invalid name refused" $CF rename newname "Bad Name"
 code 1 "rename needs two args" $CF rename newname
 $CF remove newname --yes >/dev/null
 
+echo "[statusline]"
+eq "statusline: unset config dir outside any session shows the cwd binding" "$(cd "$T/s/fenced/proj" && env -u CLAUDE_CONFIG_DIR -u CFENCE_PROFILE $CF statusline --plain </dev/null)" "[personal]"
+eq "statusline: cfence-launched main session is main" "$(cd "$T/s/fenced/proj" && env -u CLAUDE_CONFIG_DIR CFENCE_PROFILE=main $CF statusline --plain </dev/null)" "[main]"
+eq "statusline: unbound dir outside a session is main" "$(cd "$T/s/evil" && env -u CLAUDE_CONFIG_DIR -u CFENCE_PROFILE $CF statusline --plain </dev/null)" "[main]"
+eq "statusline: profile dir maps to its name" "$(CLAUDE_CONFIG_DIR="$P/work2" $CF statusline --plain </dev/null)" "[work2]"
+eq "statusline: trailing slash tolerated" "$(CLAUDE_CONFIG_DIR="$P/work2/" $CF statusline --plain </dev/null)" "[work2]"
+eq "statusline: unknown config dir shows ?" "$(CLAUDE_CONFIG_DIR=/elsewhere $CF statusline --plain </dev/null)" "[?]"
+has "statusline: colour output uses a truecolor escape" "$(echo '{}' | CLAUDE_CONFIG_DIR="$P/work2" $CF statusline)" $'\033[38;2;'
+eq "statusline: NO_COLOR gives plain text" "$(NO_COLOR=1 CLAUDE_CONFIG_DIR="$P/work2" $CF statusline </dev/null)" "[work2]"
+code 0 "statusline never fails (even with a broken HOME config)" env CFENCE_PROFILES_DIR=/nonexistent $CF statusline
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]

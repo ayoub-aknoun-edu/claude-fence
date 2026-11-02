@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `cfence statusline`: profile segment for Claude Code's `statusLine` (reads the real `CLAUDE_CONFIG_DIR`; colour or `--plain`; never fails or blocks).
 - `cfence rename <old> <new>`: renames a profile and carries its shim and directory bindings along (rolls back if bindings cannot be updated).
 - `cfence completion bash|zsh|fish`: tab-completion for commands, profile names and directories.
 

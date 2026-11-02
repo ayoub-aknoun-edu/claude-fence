@@ -67,6 +67,7 @@ Your existing `~/.claude` login is the built-in profile **`main`** — untouched
 | `cfence bind <profile> [dir]` · `unbind [dir]` · `bindings` | Manage fences. |
 | `cfence env [name] [--fish]` | Print `export CLAUDE_CONFIG_DIR=…` for IDEs/other tools: `eval "$(cfence env personal)"` (honours fences). |
 | `cfence mcp share|unshare|list|sync` | Shared MCP registry. |
+| `cfence statusline [--plain]` | Print the active profile for a Claude Code `statusLine`. |
 | `cfence rename <old> <new>` | Rename a profile; its shim and every directory binding follow. |
 | `cfence remove <name> --yes` | Delete a profile (login + private data). Shared files and main are never touched. |
 | `cfence completion bash\|zsh\|fish` | Print a shell completion script. |
@@ -81,6 +82,25 @@ echo 'eval "$(cfence completion zsh)"'  >> ~/.zshrc      # zsh
 echo 'eval "$(cfence completion bash)"' >> ~/.bashrc     # bash
 cfence completion fish > ~/.config/fish/completions/cfence.fish   # fish
 ```
+
+### Claude statusline
+
+Show which account a session is really running under, inside Claude Code itself. `cfence statusline` reads the session's `CLAUDE_CONFIG_DIR`, so it is correct even when you forced another profile. Add to `~/.claude/settings.json` (shared by every profile, so one edit covers all of them):
+
+```json
+{ "statusLine": { "type": "command", "command": "cfence statusline" } }
+```
+
+Already have a status line? Prepend the segment:
+
+```bash
+#!/usr/bin/env bash
+input="$(cat)"
+printf '%s ' "$(cfence statusline </dev/null)"
+printf '%s' "$input" | your-existing-statusline
+```
+
+`--plain` (or `NO_COLOR=1`) prints `[name]` without colour. It never fails and never blocks on stdin.
 
 ### tmux
 
