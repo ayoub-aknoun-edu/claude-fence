@@ -254,6 +254,30 @@ has "statusline: colour output uses a truecolor escape" "$(echo '{}' | CLAUDE_CO
 eq "statusline: NO_COLOR gives plain text" "$(NO_COLOR=1 CLAUDE_CONFIG_DIR="$P/work2" $CF statusline </dev/null)" "[work2]"
 code 0 "statusline never fails (even with a broken HOME config)" env CFENCE_PROFILES_DIR=/nonexistent $CF statusline
 
+echo "[launch]"
+$CF add lprof >/dev/null
+printf '#!/bin/sh\necho "APP cfg=${CLAUDE_CONFIG_DIR:-<unset>} prof=$CFENCE_PROFILE key=${ANTHROPIC_API_KEY:-none} args=$*"\n' > "$T/fakebin/fakeapp"; chmod +x "$T/fakebin/fakeapp"
+out="$(cd "$T/s/fenced/proj" && PATH="$T/fakebin:$PATH" ANTHROPIC_API_KEY=k $CF launch -- fakeapp a b 2>/dev/null)"
+has "launch runs the command under the bound profile" "$out" "cfg=$P/personal"; has "launch sets CFENCE_PROFILE" "$out" "prof=personal"
+has "launch strips credential vars in a fence" "$out" "key=none"; has "launch passes arguments through" "$out" "args=a b"
+out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- fakeapp 2>/dev/null)"; has "launch in an unbound dir uses main" "$out" "prof=main"
+out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -p lprof -- fakeapp 2>/dev/null)"; has "launch -p picks a profile" "$out" "cfg=$P/lprof"
+code 3 "launch refuses a profile that contradicts the fence" bash -c "cd '$T/s/fenced/proj' && PATH='$T/fakebin:$PATH' $CF launch -p lprof -- fakeapp"
+out="$(cd "$T/s/fenced/proj" && PATH="$T/fakebin:$PATH" $CF launch --force -p lprof -- fakeapp 2>/dev/null)"; has "launch --force overrides" "$out" "cfg=$P/lprof"
+code 127 "launch of a missing command fails" $CF launch -- definitely-not-a-command-xyz
+code 2 "launch without a command is a usage error" $CF launch
+printf '#!/bin/sh\nexit 0\n' > "$T/fakebin/cursor"; chmod +x "$T/fakebin/cursor"
+out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- cursor 0 2>&1)"
+hasnt "no 'already running' warning when the IDE is not running" "$out" "already running"
+mkdir -p "$T/ide"; printf '#!/bin/sh\nsleep 20\n' > "$T/ide/zed"; printf '#!/bin/sh\nexit 0\n' > "$T/fakebin/zed"; chmod +x "$T/ide/zed" "$T/fakebin/zed"
+"$T/ide/zed" & IDEPID=$!; sleep 0.5
+if pgrep -x zed >/dev/null 2>&1; then
+  out="$(cd "$T/w/proj-x" && PATH="$T/fakebin:$PATH" $CF launch -- zed 2>&1)"; has "warns when the IDE is already running" "$out" "already running"
+else ok "(skipped: this OS cannot see the fake editor by name)"; fi
+kill "$IDEPID" 2>/dev/null; wait "$IDEPID" 2>/dev/null
+
+$CF remove lprof --yes >/dev/null
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [[ $FAIL -eq 0 ]]

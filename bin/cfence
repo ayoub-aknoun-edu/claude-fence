@@ -400,7 +400,7 @@ cmd_env() { # cfence env [name] -> eval "$(cfence env personal)" for IDEs / othe
   else (( fish )) && printf 'set -gx CLAUDE_CONFIG_DIR %s\n' "$(profile_dir "$name")" || printf 'export CLAUDE_CONFIG_DIR=%q\n' "$(profile_dir "$name")"; fi
 }
 
-cmd_run() {
+run_common() { # RUN_MODE=claude: exec the real claude | RUN_MODE=launch: exec any command under the resolved profile
   local explicit="" force=""
   while [[ $# -gt 0 ]]; do case "$1" in
     -p|--profile) [[ -n "${2:-}" ]] || die "run: -p needs a name"; explicit="$2"; shift 2;;
@@ -414,23 +414,34 @@ cmd_run() {
   if [[ -n "$BOUND_PROFILE" && "$profile" != "$BOUND_PROFILE" && -z "$force" ]]; then
     die "$BOUND_PATH is fenced to '$BOUND_PROFILE' but '$profile' was requested ($PICK_REASON). Use the --force flag only if you really mean it." 3
   fi
-  local real v; real="$(real_claude)"
+  local real v ide
+  if [[ "$RUN_MODE" == launch ]]; then
+    [[ $# -gt 0 ]] || die "usage: cfence launch [-p name] [--force] -- <command> [args]" 2
+    real="$(command -v -- "$1")" || die "launch: command not found: $1" 127
+    shift
+    case "$(basename "$real")" in code|codium|cursor|windsurf|zed|idea|pycharm|webstorm|goland|clion|rider|phpstorm|rubymine|datagrip) ide=1;; *) ide=0;; esac
+    if (( ide )) && pgrep -x -- "$(basename "$real")" >/dev/null 2>&1; then
+      warn "$(basename "$real") is already running; it may reuse that process (and its account), ignoring '$profile'. Close it first, or give it its own instance (see README: IDEs)."
+    fi
+  else real="$(real_claude)"; fi
   if [[ -n "$BOUND_PROFILE" ]]; then   # env credentials outrank the profile login, so they would defeat the fence
     for v in $CRED_VARS; do [[ -n "${!v:-}" ]] && { warn "$v is set; ignoring it inside a fenced directory"; unset "$v"; }; done
   fi
   [[ "$profile" == "$MAIN_NAME" ]] || sync_profile "$profile" || warn "sync skipped (launching anyway; see: cfence doctor)"
   if [[ "$profile" == "$MAIN_NAME" ]]; then unset CLAUDE_CONFIG_DIR; else CLAUDE_CONFIG_DIR="$(profile_dir "$profile")"; export CLAUDE_CONFIG_DIR; fi
   export CFENCE_PROFILE="$profile" CFENCE_PID="$$"
-  [[ -z "${CFENCE_QUIET:-}" && -t 2 ]] && info "▶ claude [$profile]${BOUND_PROFILE:+ (fenced)}"
+  [[ -z "${CFENCE_QUIET:-}" && -t 2 ]] && info "▶ $( [[ "$RUN_MODE" == launch ]] && basename "$real" || echo claude ) [$profile]${BOUND_PROFILE:+ (fenced)}"
   # tmux: label the pane, then exec so the pane's foreground process stays `claude`
   # (tmux names windows after it; a wrapper process would show up as "bash").
   # The label is only displayed while the pane runs claude (see contrib/tmux.conf), so no cleanup is needed.
-  if [[ -n "${TMUX:-}" && -n "${TMUX_PANE:-}" && -z "${CFENCE_NO_TMUX:-}" && "$PICK_REASON" != inherited* ]] && command -v tmux >/dev/null 2>&1; then
+  if [[ "$RUN_MODE" == claude && -n "${TMUX:-}" && -n "${TMUX_PANE:-}" && -z "${CFENCE_NO_TMUX:-}" && "$PICK_REASON" != inherited* ]] && command -v tmux >/dev/null 2>&1; then
     tmux set-option -p -t "$TMUX_PANE" @cfence "$profile" >/dev/null 2>&1 || true
     tmux set-option -p -t "$TMUX_PANE" @cfence_color "$(profile_color "$profile")" >/dev/null 2>&1 || true
   fi
   exec "$real" "$@"
 }
+cmd_run() { RUN_MODE=claude; run_common "$@"; }
+cmd_launch() { RUN_MODE=launch; run_common "$@"; }
 
 cmd_mcp() {
   local sub="${1:-list}"; shift || true; mkdir -p "$CONF_DIR"
@@ -537,6 +548,7 @@ SHARING
   sync                          re-link shared files (also happens on every launch)
 
 OTHER
+  launch [-p n] [--force] -- cmd   run any command (IDE, app) under the profile for this directory
   statusline [--plain]          print the active profile for a Claude Code statusLine
   completion bash|zsh|fish      print a shell completion script
   doctor                        diagnose PATH, shims, permissions, bindings, leaks
@@ -567,13 +579,13 @@ cmd_completion() {
     bash) cat <<'EOS'
 _cfence() {
   local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}" cmd="${COMP_WORDS[1]:-}"
-  local cmds="init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help"
+  local cmds="init add remove rename login list bind unbind bindings which env run launch mcp sync statusline doctor uninstall completion version help"
   if (( COMP_CWORD == 1 )); then COMPREPLY=( $(compgen -W "$cmds" -- "$cur") ); return; fi
   case "$cmd" in
     login|remove|rm|rename|mv|env) COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") );;
     bind) if (( COMP_CWORD == 2 )); then COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ); else COMPREPLY=( $(compgen -d -- "$cur") ); fi;;
     unbind) COMPREPLY=( $(compgen -d -- "$cur") );;
-    run) [[ "$prev" == -p || "$prev" == --profile ]] && COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ) || COMPREPLY=( $(compgen -W "-p --force --" -- "$cur") );;
+    run|launch) [[ "$prev" == -p || "$prev" == --profile ]] && COMPREPLY=( $(compgen -W "$(cfence _profiles 2>/dev/null)" -- "$cur") ) || COMPREPLY=( $(compgen -W "-p --force --" -- "$cur") );;
     add) COMPREPLY=( $(compgen -W "--share-state --login" -- "$cur") );;
     mcp) (( COMP_CWORD == 2 )) && COMPREPLY=( $(compgen -W "share unshare list sync" -- "$cur") );;
     completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
@@ -587,13 +599,13 @@ EOS
 _cfence() {
   local -a profiles; profiles=(${(f)"$(cfence _profiles 2>/dev/null)"})
   if (( CURRENT == 2 )); then
-    _values 'command' init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help; return
+    _values 'command' init add remove rename login list bind unbind bindings which env run launch mcp sync statusline doctor uninstall completion version help; return
   fi
   case "${words[2]}" in
     login|remove|rm|rename|mv|env) _describe 'profile' profiles;;
     bind) if (( CURRENT == 3 )); then _describe 'profile' profiles; else _files -/; fi;;
     unbind) _files -/;;
-    run) if [[ "${words[CURRENT-1]}" == (-p|--profile) ]]; then _describe 'profile' profiles; else _values 'option' -p --force --; fi;;
+    run|launch) if [[ "${words[CURRENT-1]}" == (-p|--profile) ]]; then _describe 'profile' profiles; else _values 'option' -p --force --; fi;;
     add) _values 'option' --share-state --login;;
     mcp) (( CURRENT == 3 )) && _values 'action' share unshare list sync;;
     completion) _values 'shell' bash zsh fish;;
@@ -604,11 +616,11 @@ EOS
     ;;
     fish) cat <<'EOS'
 complete -c cfence -f
-complete -c cfence -n __fish_use_subcommand -a "init add remove rename login list bind unbind bindings which env run mcp sync statusline doctor uninstall completion version help"
+complete -c cfence -n __fish_use_subcommand -a "init add remove rename login list bind unbind bindings which env run launch mcp sync statusline doctor uninstall completion version help"
 complete -c cfence -n '__fish_seen_subcommand_from login remove rm rename mv env' -a "(cfence _profiles 2>/dev/null)"
 complete -c cfence -n '__fish_seen_subcommand_from bind' -a "(cfence _profiles 2>/dev/null)"
-complete -c cfence -n '__fish_seen_subcommand_from run' -s p -l profile -xa "(cfence _profiles 2>/dev/null)"
-complete -c cfence -n '__fish_seen_subcommand_from run' -l force
+complete -c cfence -n '__fish_seen_subcommand_from run launch' -s p -l profile -xa "(cfence _profiles 2>/dev/null)"
+complete -c cfence -n '__fish_seen_subcommand_from run launch' -l force
 complete -c cfence -n '__fish_seen_subcommand_from add' -l share-state -l login
 complete -c cfence -n '__fish_seen_subcommand_from mcp' -a "share unshare list sync"
 complete -c cfence -n '__fish_seen_subcommand_from completion' -a "bash zsh fish"
@@ -622,7 +634,7 @@ sub="${1:-help}"; shift || true
 case "$sub" in
   init) cmd_init "$@";; add) cmd_add "$@";; remove|rm) cmd_remove "$@";; rename|mv) cmd_rename "$@";; login) cmd_login "$@";;
   list|ls) cmd_list;; bind) cmd_bind "$@";; unbind) cmd_unbind "$@";; bindings) cmd_bindings;;
-  which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; mcp) cmd_mcp "$@";;
+  which) cmd_which "$@";; env) cmd_env "$@";; run) cmd_run "$@";; launch) cmd_launch "$@";; mcp) cmd_mcp "$@";;
   sync) sync_all; write_all_shims; echo "✓ synced";; doctor) cmd_doctor;; uninstall) cmd_uninstall;;
   statusline) cmd_statusline "$@";; completion) cmd_completion "$@";; _profiles) profile_names;;
   version|--version|-V) echo "cfence $CFENCE_VERSION";; help|-h|--help) usage;;

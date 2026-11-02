@@ -67,6 +67,7 @@ Your existing `~/.claude` login is the built-in profile **`main`** — untouched
 | `cfence bind <profile> [dir]` · `unbind [dir]` · `bindings` | Manage fences. |
 | `cfence env [name] [--fish]` | Print `export CLAUDE_CONFIG_DIR=…` for IDEs/other tools: `eval "$(cfence env personal)"` (honours fences). |
 | `cfence mcp share|unshare|list|sync` | Shared MCP registry. |
+| `cfence launch [-p name] [--force] -- <cmd>` | Run any command (editor, app) under the profile for the current directory. |
 | `cfence statusline [--plain]` | Print the active profile for a Claude Code `statusLine`. |
 | `cfence rename <old> <new>` | Rename a profile; its shim and every directory binding follow. |
 | `cfence remove <name> --yes` | Delete a profile (login + private data). Shared files and main are never touched. |
@@ -82,6 +83,26 @@ echo 'eval "$(cfence completion zsh)"'  >> ~/.zshrc      # zsh
 echo 'eval "$(cfence completion bash)"' >> ~/.bashrc     # bash
 cfence completion fish > ~/.config/fish/completions/cfence.fish   # fish
 ```
+
+### IDEs and GUI apps (VS Code, JetBrains, …)
+
+Anything that runs `claude` **inside a shell** is already covered: the integrated terminal of VS Code or JetBrains, tmux panes, scripts. The shim does the work.
+
+Editor *extensions* start Claude themselves, with the editor's environment, so the shim never runs. Start the editor through cfence instead:
+
+```bash
+cd ~/work/acme-api
+cfence launch code .          # VS Code and its Claude extension get this directory's account
+cfence launch -p personal -- idea .
+```
+
+`launch` applies the same rules as `claude`: the directory's profile (or `-p`), the fence guard (`--force` to override), credential variables stripped inside fenced directories. It then runs your command with that profile's `CLAUDE_CONFIG_DIR`.
+
+**Limits you should know about**
+
+- An editor has **one** environment per running process. If VS Code is already open, `code .` hands the folder to the existing process and the new window keeps the *first* window's account. cfence warns when it sees a known editor already running. Close it first, or use a separate instance per account: `cfence launch code --user-data-dir ~/.vscode-personal .`
+- Launching from a desktop icon, Spotlight or the Dock bypasses cfence entirely; make a launcher that calls `cfence launch`, or start the editor from a terminal.
+- The extension reading `CLAUDE_CONFIG_DIR` from the editor's environment is expected, but not yet verified for every editor/version. If an extension shows the wrong account, tell us (`cfence doctor` output + editor version).
 
 ### Claude statusline
 
