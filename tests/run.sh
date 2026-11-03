@@ -86,6 +86,34 @@ if command -v git >/dev/null; then
   eq "sibling worktree inherits the repo's binding" "$(cd "$T/w/repo-feat" && $CF which -q)" "personal"
 else echo "  skip (no git)"; fi
 
+echo "[git layouts]"
+if command -v git >/dev/null; then
+  G="git -c user.email=a@b -c user.name=t -c protocol.file.allow=always"
+  # bare repo: worktrees live elsewhere and follow the bare dir's binding
+  $G init -q --bare "$T/gl/bare.git" >/dev/null 2>&1 && ( cd "$T/gl/bare.git" && $G worktree add -q --orphan -b m "$T/gl/bare-wt" ) >/dev/null 2>&1
+  if [[ -d "$T/gl/bare-wt" ]]; then
+    eq "bare repo: its worktree is unbound before binding" "$(cd "$T/gl/bare-wt" && $CF which -q)" "main"
+    $CF bind personal "$T/gl/bare.git" >/dev/null
+    eq "bare repo: a worktree follows the bare dir's binding" "$(cd "$T/gl/bare-wt" && $CF which -q)" "personal"
+    eq "bare repo: the bare dir itself is fenced" "$(cd "$T/gl/bare.git" && $CF which -q)" "personal"
+    $CF unbind "$T/gl/bare.git" >/dev/null
+  else ok "(skipped: this git cannot create an orphan worktree)"; fi
+  # --separate-git-dir: working tree binding covers it; linked worktrees need the git dir bound too
+  mkdir -p "$T/gl/sg" "$T/gl/store"
+  ( cd "$T/gl/sg" && $G init -q --separate-git-dir="$T/gl/store/sg.git" . && $G commit -q --allow-empty -m i && $G worktree add -q -b f "$T/gl/sg-feat" ) >/dev/null 2>&1
+  $CF bind personal "$T/gl/sg" >/dev/null
+  eq "separate-git-dir: the working tree is fenced" "$(cd "$T/gl/sg" && $CF which -q)" "personal"
+  $CF bind personal "$T/gl/store/sg.git" >/dev/null
+  eq "separate-git-dir: a linked worktree follows the bound git dir" "$(cd "$T/gl/sg-feat" && $CF which -q)" "personal"
+  $CF unbind "$T/gl/sg" >/dev/null; $CF unbind "$T/gl/store/sg.git" >/dev/null
+  # submodule: lives inside the superproject, so the superproject's binding applies
+  mkdir -p "$T/gl/sup"
+  ( cd "$T/gl/sup" && $G init -q && $G commit -q --allow-empty -m i && $G submodule add -q "$T/gl/sg" sub && $G commit -qm s ) >/dev/null 2>&1
+  $CF bind personal "$T/gl/sup" >/dev/null
+  eq "submodule: inherits the superproject's binding" "$(cd "$T/gl/sup/sub" && $CF which -q)" "personal"
+  $CF unbind "$T/gl/sup" >/dev/null
+else echo "  skip (no git)"; fi
+
 echo "[mcp registry]"
 $CF mcp share plane >/dev/null
 eq "registry has the server" "$($CF mcp list | cut -f1)" "plane"
