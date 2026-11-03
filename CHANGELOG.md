@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 0.2.3 — 2026-11-03
 - **docs:** new README demo (real tmux session: per-folder accounts, refusal, worktrees, `launch`, tmux status badge) and a reworked reproducible recorder (`contrib/demo/record.py`); `contrib/sandbox.sh` gives a throwaway HOME to try cfence without touching real accounts.
 - **hardening:** MCP sync and profile seeding now detect a concurrent change to `.claude.json` (e.g. a running Claude) and redo their edit on the fresh content instead of overwriting it. README caveat for account-level keys in the shared `settings.json` now says how to keep them per profile.
 - **docs:** a "Platform verification report" issue form for WSL2, real-Mac and VS Code reports, linked from the README.
