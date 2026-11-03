@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **hardening:** MCP sync and profile seeding now detect a concurrent change to `.claude.json` (e.g. a running Claude) and redo their edit on the fresh content instead of overwriting it. README caveat for account-level keys in the shared `settings.json` now says how to keep them per profile.
 - **docs:** a "Platform verification report" issue form for WSL2, real-Mac and VS Code reports, linked from the README.
 - **release automation:** pushing a `v*` tag now publishes the GitHub release from the matching CHANGELOG section, and refuses if the tag doesn't match `CFENCE_VERSION`, isn't on `main`, or has no changelog entry.
 

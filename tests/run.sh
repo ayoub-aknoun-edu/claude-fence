@@ -86,6 +86,22 @@ if command -v git >/dev/null; then
   eq "sibling worktree inherits the repo's binding" "$(cd "$T/w/repo-feat" && $CF which -q)" "personal"
 else echo "  skip (no git)"; fi
 
+echo "[concurrent writer]"
+# a running Claude rewrites ~/.claude.json while cfence is mid-sync: its change must survive, and ours must still land
+$CF add racer >/dev/null; $CF mcp share plane >/dev/null; $CF mcp sync >/dev/null
+RJ="$P/racer/.claude.json"; python3 - "$RJ" <<'PYX'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("mcpServers",None); json.dump(d,open(p,"w"))
+PYX
+rm -f "$P/racer/.cfence-mcp-stamp"
+( CFENCE_TEST_PAUSE=1 $CF mcp sync >/dev/null 2>&1 ) & RPID=$!
+sleep 0.4; python3 - "$RJ" <<'PYX'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["lateKey"]="kept"; json.dump(d,open(p,"w"))
+PYX
+wait $RPID
+eq "concurrent write by another process is not lost" "$(python3 -c "import json;print(json.load(open('$RJ')).get('lateKey'))")" "kept"
+eq "...and the sync still applied on top of it" "$(python3 -c "import json;print('plane' in json.load(open('$RJ')).get('mcpServers',{}))")" "True"
+$CF remove racer --yes >/dev/null
+
 echo "[git layouts]"
 if command -v git >/dev/null; then
   G="git -c user.email=a@b -c user.name=t -c protocol.file.allow=always"
