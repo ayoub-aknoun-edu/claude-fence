@@ -150,7 +150,7 @@ claude ──▶ shim ──▶ cfence run ──▶ picks profile ──▶ exe
 
 * **Profiles** live in `~/.claude-profiles/<name>/` (own `.credentials.json`, `.claude.json`, history…). `main` = `~/.claude`.
 * **Bindings** are in `~/.config/cfence/bindings` (`<profile> <absolute path>`), *outside* your repos, so you never commit "personal" into a company repo or your public dotfiles.
-* **Worktrees:** if the cwd isn't bound, cfence also tries the git *main worktree* — so `git worktree add ../repo-feature` inherits the repo's fence.
+* **Worktrees:** if the cwd isn't bound, cfence also tries the git *main worktree* — so `git worktree add ../repo-feature` inherits the repo's fence. Submodules sit inside their superproject, so they inherit its fence. For a **bare repo**, bind the bare directory and its worktrees follow. For a repo made with `--separate-git-dir`, also bind the git directory (git doesn't record where the working tree lives), or its linked worktrees stay on `main`.
 * **Real binary:** found by removing the shim dir from `PATH`; Claude's self-updater keeps working.
 * **Per-launch sync:** shared symlinks and the MCP registry are re-applied on launch (cheap; Python runs only when the registry changed).
 

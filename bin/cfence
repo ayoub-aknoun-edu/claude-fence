@@ -153,8 +153,11 @@ resolve_for_cwd() { # direct match first, then the git main worktree (covers `gi
   [[ -n "$BOUND_PROFILE" ]] && return 0
   common="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
   [[ "$common" == /* ]] || common="$(cd "$common" 2>/dev/null && pwd -P)" || return 0
-  [[ "$(basename "$common")" == ".git" ]] || return 0
-  root="$(dirname "$common")"
+  # the main worktree is git's first entry (normal repos and bare repos); with --separate-git-dir git
+  # reports the git dir itself, since the working tree is not recorded anywhere - bind that dir too
+  root="$(git worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')" || root=""
+  [[ -d "$root" ]] || return 0
+  root="$(cd "$root" && pwd -P)" || return 0
   # only trust a REGISTERED linked worktree (a stray .git file pointing at another repo must not borrow its fence)
   local gd top
   gd="$(git rev-parse --absolute-git-dir 2>/dev/null)" || return 0
