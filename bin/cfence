@@ -83,6 +83,18 @@ def save(p, d, backup=True):
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p) or ".", prefix=".cfence-")
     with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2)
     os.chmod(tmp, 0o600); os.replace(tmp, p)
+def stamp(p):
+    try: st = os.stat(p); return (st.st_mtime_ns, st.st_size, st.st_ino)
+    except OSError: return None
+def update(p, fn, tries=5):
+    """read-modify-write that notices another writer (e.g. a running Claude) and redoes the change on fresh data"""
+    for _ in range(tries):
+        before = stamp(p); d = load(p)
+        out = fn(d)                                    # returns the new content, or None for "nothing to do"
+        if out is None: return False
+        if os.environ.get("CFENCE_TEST_PAUSE"): import time; time.sleep(float(os.environ["CFENCE_TEST_PAUSE"]))  # test hook
+        if stamp(p) == before: save(p, out); return True
+    sys.exit("%s keeps changing underneath us (is Claude writing it?); nothing was changed, try again" % p)
 m = sys.argv[1]
 if m == "account":
     a = load(sys.argv[2]).get("oauthAccount")
@@ -94,15 +106,19 @@ elif m == "mcp-share":                      # src_json reg name...
         reg[n] = src[n]
     save(sys.argv[3], reg, backup=False)
 elif m == "mcp-apply":                      # reg target_json   -> prints changed|same
-    reg = load(sys.argv[2]); tgt = load(sys.argv[3]); cur = tgt.get("mcpServers", {})
-    new = dict(cur); new.update(reg)
-    if new != cur and reg:
-        tgt["mcpServers"] = new; save(sys.argv[3], tgt); print("changed")
-    else: print("same")
+    reg = load(sys.argv[2])
+    def f(tgt):
+        cur = tgt.get("mcpServers", {}); new = dict(cur); new.update(reg)
+        if new == cur or not reg: return None
+        return dict(tgt, mcpServers=new)
+    print("changed" if update(sys.argv[3], f) else "same")
 elif m == "mcp-drop":                       # target_json name reg  (only drops what cfence put there)
-    tgt = load(sys.argv[2]); cur = tgt.get("mcpServers", {}); reg = load(sys.argv[4])
-    if sys.argv[3] in cur and cur[sys.argv[3]] == reg.get(sys.argv[3]):
-        del cur[sys.argv[3]]; save(sys.argv[2], tgt)
+    reg = load(sys.argv[4]); name = sys.argv[3]
+    def f(tgt):
+        cur = tgt.get("mcpServers", {})
+        if name not in cur or cur[name] != reg.get(name): return None
+        return dict(tgt, mcpServers={k: v for k, v in cur.items() if k != name})
+    update(sys.argv[2], f)
 elif m == "mcp-unregister":                 # reg name
     reg = load(sys.argv[2])
     if sys.argv[3] not in reg: sys.exit("%r is not in the shared registry" % sys.argv[3])
@@ -111,10 +127,11 @@ elif m == "mcp-list":
     for n, v in sorted(load(sys.argv[2]).items()):
         print("%s\t%s" % (n, v.get("command") or v.get("url") or v.get("type", "?")))
 elif m == "seed":                           # main_json target_json key...
-    src = load(sys.argv[2]); tgt = load(sys.argv[3])
-    for k in sys.argv[4:]:
-        if k in src and k not in tgt: tgt[k] = src[k]
-    save(sys.argv[3], tgt, backup=False)
+    src = load(sys.argv[2]); keys = sys.argv[4:]
+    def f(tgt):
+        add = {k: src[k] for k in keys if k in src and k not in tgt}
+        return dict(tgt, **add) if add else None
+    update(sys.argv[3], f)
 '
 pyj() { need_python; python3 -I -c "$PY" "$@"; }
 
