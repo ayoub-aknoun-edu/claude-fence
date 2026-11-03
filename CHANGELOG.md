@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **fish fixes:** the PATH line is now session-scoped (`set -gx PATH …`) so nothing persists in fish's universal variables after `uninstall`; `uninstall` removes the stale `fish_user_paths` entry that earlier versions left; `cfence env --fish` quotes paths; CI now tests fish on Linux and macOS. Existing fish users: run `cfence uninstall && cfence init` once to replace the old block.
 
 ## 0.2.0 — 2026-11-02
 - **Security fix:** directory bindings now match by inode as well as by path string, so a fenced folder stays fenced under another spelling (different case on case-insensitive filesystems such as default macOS APFS, bind mounts, hand-edited non-canonical paths). `bind`/`unbind` replace/remove every spelling of a folder.
