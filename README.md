@@ -106,7 +106,7 @@ cfence launch -p personal -- idea .
 
 ### Windows (WSL2)
 
-cfence is a bash tool, so **native Windows (PowerShell/cmd) is not supported**. **WSL2 is expected to work**: it is a real Linux userland, and cfence's Linux test suite is what runs in CI. It has not been run on WSL itself yet, so treat it as unverified and please report what you find.
+cfence is a bash tool, so **native Windows (PowerShell/cmd) is not supported**. **WSL2 is expected to work**: it is a real Linux userland, and cfence's Linux test suite is what runs in CI. It has not been run on WSL itself yet, so treat it as unverified and please [report what you find](https://github.com/ayoub-aknoun-edu/claude-fence/issues/new?template=platform_verification.yml).
 
 - Install and run cfence **inside** the WSL distro (`./install.sh` there), and keep `~` and your fenced projects in the **Linux filesystem** (`~/projects/...`), not under `/mnt/c/...`. Windows drives have unreliable symlinks and permissions. `cfence doctor` detects WSL and warns about this.
 - `claude` in the WSL terminal and in tmux behaves exactly as on Linux.

@@ -1,0 +1,42 @@
+name: Platform verification report
+description: Tell us what worked (or not) on a platform the maintainers can't test themselves
+title: "[verify] <platform>: "
+labels: ["verification"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! Please run **`cfence doctor`** and **`tests/run.sh`** (from a clone) on your setup and report the results.
+        Platforms we can't test ourselves: **WSL2**, a **real Mac desktop session**, the **VS Code extension** (`cfence launch code`), **fish/zsh on other distros**.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [WSL2, macOS, VS Code extension, Other Linux distro, Other]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: cfence version and OS (`cfence version`, `uname -a`)
+    validations: { required: true }
+  - type: dropdown
+    id: result
+    attributes:
+      label: Did it work?
+      options: ["Yes, everything", "Partly", "No"]
+    validations: { required: true }
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `cfence doctor`
+      render: text
+    validations: { required: true }
+  - type: textarea
+    id: tests
+    attributes:
+      label: Last lines of `bash tests/run.sh` (the passed/failed count, and any FAIL lines)
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else (what you tried, which profile showed up where)
