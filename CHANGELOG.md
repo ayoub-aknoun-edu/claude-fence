@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 0.2.2 — 2026-11-03
 - **fix:** linked worktrees of a **bare repo** now inherit the bare directory's binding (before, they silently fell back to `main`). Submodules and `--separate-git-dir` are now covered by tests; for `--separate-git-dir` repos, bind the git directory as well (documented).
 
 ## 0.2.1 — 2026-11-03
