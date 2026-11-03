@@ -10,3 +10,9 @@ Thanks for helping! The project is one bash script (`bin/cfence`), an installer 
 - Conventional commit messages (`feat:`, `fix:`, `docs:`, `test:`).
 
 - **Demo GIF:** `assets/demo.gif` is generated, not hand-made: `python3 contrib/demo/record.py out/` writes a cast from a real shell session in a throwaway `$HOME` with a fake `claude`; render it with [agg](https://github.com/asciinema/agg) (`agg out/demo.cast assets/demo.gif --theme dracula --font-size 18 --speed 1.5 --idle-time-limit 2`).
+
+## Releasing (maintainers)
+
+1. Open a `chore: release X.Y.Z` PR: set `CFENCE_VERSION` in `bin/cfence` and rename `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z — YYYY-MM-DD` (keep an empty `## Unreleased` above it). Merge it.
+2. Tag the merge commit and push the tag: `git tag -a vX.Y.Z <commit> -m "claude-fence vX.Y.Z" && git push origin vX.Y.Z`.
+3. The `release` workflow publishes the GitHub release from the changelog section. It fails (and publishes nothing) if the tag doesn't match `CFENCE_VERSION`, isn't on `main`, or has no changelog entry. Never move or reuse a published tag; ship a new patch instead.
