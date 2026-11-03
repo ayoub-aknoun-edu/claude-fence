@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 0.2.1 — 2026-11-03
 - **fish fixes:** the PATH line is now session-scoped (`set -gx PATH …`) so nothing persists in fish's universal variables after `uninstall`; `uninstall` removes the stale `fish_user_paths` entry that earlier versions left; `cfence env --fish` quotes paths; CI now tests fish on Linux and macOS. Existing fish users: run `cfence uninstall && cfence init` once to replace the old block.
 
 ## 0.2.0 — 2026-11-02
