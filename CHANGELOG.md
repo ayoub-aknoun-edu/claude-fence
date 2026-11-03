@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **docs:** a "Platform verification report" issue form for WSL2, real-Mac and VS Code reports, linked from the README.
 - **release automation:** pushing a `v*` tag now publishes the GitHub release from the matching CHANGELOG section, and refuses if the tag doesn't match `CFENCE_VERSION`, isn't on `main`, or has no changelog entry.
 
 ## 0.2.2 — 2026-11-03
