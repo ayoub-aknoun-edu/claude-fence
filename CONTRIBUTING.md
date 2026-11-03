@@ -11,6 +11,10 @@ Thanks for helping! The project is one bash script (`bin/cfence`), an installer 
 
 - **Demo GIF:** `assets/demo.gif` is generated, not hand-made: `python3 contrib/demo/record.py out/` writes a cast from a real shell session in a throwaway `$HOME` with a fake `claude`; render it with [agg](https://github.com/asciinema/agg) (`agg out/demo.cast assets/demo.gif --theme dracula --font-size 18 --speed 1.5 --idle-time-limit 2`).
 
+## Trying it safely
+
+`source contrib/sandbox.sh` gives your current shell a throwaway `HOME` (and XDG dirs) plus a fake `claude`, so you can run any `cfence` command without touching real accounts. Close the terminal to leave.
+
 ## Releasing (maintainers)
 
 1. Open a `chore: release X.Y.Z` PR: set `CFENCE_VERSION` in `bin/cfence` and rename `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z — YYYY-MM-DD` (keep an empty `## Unreleased` above it). Merge it.
