@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **fix:** `--force` now works through the shims (`claude-work2 --force`, `claude --force`). It used to be passed on to Claude instead of lifting the fence, so the override was only usable via `cfence run --force`.
 
 ## 0.2.3 — 2026-11-03
 - **docs:** new README demo (real tmux session: per-folder accounts, refusal, worktrees, `launch`, tmux status badge) and a reworked reproducible recorder (`contrib/demo/record.py`); `contrib/sandbox.sh` gives a throwaway HOME to try cfence without touching real accounts.

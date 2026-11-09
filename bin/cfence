@@ -448,6 +448,8 @@ run_common() { # RUN_MODE=claude: exec the real claude | RUN_MODE=launch: exec a
   while [[ $# -gt 0 ]]; do case "$1" in
     -p|--profile) [[ -n "${2:-}" ]] || die "run: -p needs a name"; explicit="$2"; shift 2;;
     --force) force=1; shift;; --) shift; break;; *) break;; esac; done
+  # shims run `cfence run [-p name] -- "$@"`, so `claude-work2 --force` arrives as the first arg after `--`
+  [[ "$RUN_MODE" == claude && "${1:-}" == --force ]] && { force=1; shift; }
   pick_profile "$explicit"
   local profile="$PICK_PROFILE"
   if [[ -n "$BOUND_PROFILE" ]] && ! profile_exists "$BOUND_PROFILE"; then
