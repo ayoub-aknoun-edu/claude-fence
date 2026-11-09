@@ -62,7 +62,7 @@ Your existing `~/.claude` login is the built-in profile **`main`** — untouched
 | Command | What it does |
 |---|---|
 | `claude` | Launch with the profile for the current directory. |
-| `claude-<name>` | One-off override for that profile (refused inside a fence unless `--force`). |
+| `claude-<name>` | One-off override for that profile (refused inside a fence unless you add `--force`: `claude-work2 --force`). |
 | `cfence which [-q]` | Which profile applies here, and why (explicit / inherited / bound path / default). |
 | `cfence bind <profile> [dir]` · `unbind [dir]` · `bindings` | Manage fences. |
 | `cfence env [name] [--fish]` | Print `export CLAUDE_CONFIG_DIR=…` for IDEs/other tools: `eval "$(cfence env personal)"` (honours fences). |

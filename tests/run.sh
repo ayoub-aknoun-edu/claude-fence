@@ -62,6 +62,7 @@ out="$(cd "$T/w/proj-x" && CLAUDE_CONFIG_DIR=/leaked $CF run -- hi)"; has "main 
 code 3 "wrong profile in fenced dir is refused" bash -c "cd '$T/w/proj' && $CF run -p work2 -- hi"
 code 0 "--force overrides the fence (exit code)" bash -c "cd '$T/w/proj' && $CF run --force -p work2 -- hi"
 code 3 "shim claude-work2 refused in personal dir" bash -c "cd '$T/w/proj' && PATH='$SHIM:$PATH' claude-work2 hi"
+out="$(cd "$T/w/proj" && PATH="$SHIM:$PATH" claude-work2 --force hi 2>/dev/null)"; has "shim: claude-work2 --force overrides the fence" "$out" "cfg=$P/work2"; hasnt "shim: --force is consumed, not passed to claude" "$out" "args=--force"
 out="$(cd "$T/w/proj-x" && PATH="$SHIM:$PATH" claude-work2 hi)"; has "shim override works in unbound dir" "$out" "cfg=$P/work2"
 out="$(cd "$T/w/proj" && PATH="$SHIM:$PATH" claude hi there)"; has "plain claude shim passes args + picks binding" "$out" "args=hi there"
 
