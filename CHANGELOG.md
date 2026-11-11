@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **tmux:** the window list now shows a small coloured tag with the profile name (` work2 `) after each Claude window, instead of an unexplained `●` dot. Update the two `window-status*` lines in your tmux.conf from `contrib/tmux.conf`.
 - **fix:** `--force` now works through the shims (`claude-work2 --force`, `claude --force`). It used to be passed on to Claude instead of lifting the fence, so the override was only usable via `cfence run --force`.
 
 ## 0.2.3 — 2026-11-03
