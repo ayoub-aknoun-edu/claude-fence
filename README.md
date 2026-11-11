@@ -137,7 +137,7 @@ The statusline is shown by the terminal UI; the VS Code extension does not displ
 cat contrib/tmux.conf >> ~/.tmux.conf   # then: tmux source-file ~/.tmux.conf
 ```
 
-Adds `⬤ profile` to `status-right` and window names like `claude:work2` while `claude` runs. If you use tmux-continuum, keep the snippet *before* its load line (it hooks `status-right`).
+Adds `⬤ profile` to `status-right` and window names like `work2` while `claude` runs. If you use tmux-continuum, keep the snippet *before* its load line (it hooks `status-right`).
 
 ## How it works
 
