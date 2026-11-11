@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-- **tmux:** windows running Claude are now named after their profile (e.g. `work2`) instead of getting an unexplained `●` dot; it only sets the window name, so it works with any theme. Replace the two `window-status*` lines in your tmux.conf with the `automatic-rename-format` line from `contrib/tmux.conf`.
+- **tmux:** windows running Claude are now named `cl:<profile>` (e.g. `cl:work2`) instead of getting an unexplained `●` dot; it only sets the window name, so it works with any theme. Replace the two `window-status*` lines in your tmux.conf with the `automatic-rename-format` line from `contrib/tmux.conf`.
 - **fix:** `--force` now works through the shims (`claude-work2 --force`, `claude --force`). It used to be passed on to Claude instead of lifting the fence, so the override was only usable via `cfence run --force`.
 
 ## 0.2.3 — 2026-11-03
